@@ -172,9 +172,10 @@ curl -X POST http://localhost:3001/api/ollama \
 - Lee variables de entorno desde `.env` o el sistema.
 
 ### Ollama
-- Modelo: llama3:8b (CPU, 4GB RAM mínimo)
+- Modelo: llama3:8b (CPU, 8GB RAM mínimo, 4 núcleos)
 - Puerto host: 11435
 - Puerto contenedor: 11434
+- El modelo llama3:8b se descarga automáticamente al iniciar el contenedor, no es necesario hacerlo manualmente.
 
 ### React + Vite
 - Interfaz web para pruebas y monitoreo.
@@ -508,11 +509,3 @@ curl http://localhost:3001/api/requests
    ```sh
    docker compose up -d
    ```
-2. Abre tu navegador y accede a:
-   - [http://localhost:5173](http://localhost:5173)
-3. Desde el portal puedes:
-   - Enviar nuevos prompts a la base de datos
-   - Enviar prompts directamente a Ollama
-   - Visualizar la cola de prompts y sus respuestas
-
----

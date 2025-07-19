@@ -27,7 +27,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
+          memory: 8g
+          cpus: '4.0'
+        reservations:
+          memory: 8g
+          cpus: '4.0'
     networks:
       - ai_bridge_net
     command: serve
