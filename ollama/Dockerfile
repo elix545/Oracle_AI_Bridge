@@ -4,9 +4,9 @@ FROM ollama/ollama:latest
 ENV OLLAMA_MODELS=/models
 ENV OLLAMA_MODEL=llama3:8b
 
-# Descargar el modelo al build y dejarlo disponible en el contenedor
-RUN ollama pull llama3:8b
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 11434
 
-CMD ["serve"] 
+ENTRYPOINT ["/entrypoint.sh"] 
