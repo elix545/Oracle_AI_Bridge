@@ -333,3 +333,41 @@ Este proyecto está diseñado para ser ejecutado fácilmente usando Docker y Doc
 Todos los servicios están conectados en la red `ai_bridge_net` para facilitar la comunicación interna.
 
 ---
+
+## Troubleshooting: Rebuild y limpieza de contenedores
+
+Si ocurre algún error o necesitas reiniciar completamente el entorno, puedes detener, eliminar y reconstruir todos los contenedores y volúmenes de la siguiente manera:
+
+### 1. Detener todos los contenedores
+```sh
+docker compose down
+```
+Esto detiene y elimina todos los contenedores definidos en el `docker-compose.yml`.
+
+### 2. Eliminar volúmenes y datos persistentes
+```sh
+docker compose down -v
+```
+Esto elimina también los volúmenes asociados (por ejemplo, los datos de Oracle), permitiendo una inicialización limpia.
+
+### 3. (Opcional) Eliminar imágenes antiguas
+```sh
+docker image prune -a
+```
+Esto elimina todas las imágenes no utilizadas para liberar espacio.
+
+### 4. Reconstruir y levantar todo desde cero
+```sh
+docker compose up --build
+```
+Esto fuerza la reconstrucción de todas las imágenes y la recreación de los contenedores.
+
+> **Nota:** Si tienes contenedores fuera de Docker Compose, puedes detenerlos todos con:
+> ```sh
+> docker stop $(docker ps -aq)
+> docker rm $(docker ps -aq)
+> ```
+
+Con estos pasos puedes garantizar un entorno limpio y funcional ante cualquier error o corrupción de datos.
+
+---
