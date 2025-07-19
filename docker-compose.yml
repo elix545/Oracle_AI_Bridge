@@ -3,7 +3,7 @@ services:
     image: wnameless/oracle-xe-11g-r2
     container_name: oracle-xe
     ports:
-      - '51521:1521'
+      - '51522:1521'
     volumes:
       - ./oracle/scripts:/docker-entrypoint-initdb.d
     networks:

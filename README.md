@@ -396,7 +396,7 @@ Todos los servicios están conectados en la red `ai_bridge_net` para facilitar l
   ```
 - Si accedes desde tu máquina host (por ejemplo, con SQL Developer o un cliente externo), usa:
   - **Host:** `localhost`
-  - **Puerto:** `51521`
+  - **Puerto:** `51522`
 - Si accedes desde otro contenedor en la misma red de Docker Compose, usa:
   - **Host:** `oracle-xe`
   - **Puerto:** `1521`
@@ -447,7 +447,7 @@ Con estos pasos puedes garantizar un entorno limpio y funcional ante cualquier e
 ## Parámetros y puertos utilizados
 
 - **Oracle XE:**
-  - Puerto host: 51521
+  - Puerto host: 51522
   - Puerto contenedor: 1521
   - Usuario: system
   - Contraseña: oracle
@@ -463,6 +463,16 @@ Con estos pasos puedes garantizar un entorno limpio y funcional ante cualquier e
 - Oracle XE: espera 30 segundos antes de iniciar servicios dependientes
 - Ollama: espera 15 segundos antes de iniciar servicios dependientes
 - Node.js: espera 10 segundos antes de iniciar servicios dependientes
+
+## Frecuencia de lectura del servicio Node.js a Oracle
+
+- El servicio Node.js realiza polling a la base de datos Oracle para leer nuevos requests.
+- Por defecto, el intervalo de polling es de **10 segundos** (configurable mediante el parámetro `timeout` en la API o ajustando el código del servicio).
+- Puedes cambiar este valor modificando el parámetro en la llamada a la API:
+  ```bash
+  curl "http://localhost:3001/api/request?timeout=15"
+  ```
+- El valor por defecto está pensado para balancear carga y latencia, pero puedes ajustarlo según tus necesidades.
 
 ## Ejemplo de uso de la API (curl)
 
