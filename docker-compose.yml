@@ -23,7 +23,7 @@ services:
     environment:
       OLLAMA_MODEL: llama3:8b
     ports:
-      - '11434:11434'
+      - '11435:11434'
     deploy:
       resources:
         limits:
