@@ -30,6 +30,7 @@ services:
           memory: 4g
     networks:
       - ai_bridge_net
+    command: serve
 
   node-service:
     build: ./node-service
