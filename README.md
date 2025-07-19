@@ -123,7 +123,23 @@ curl -X POST http://localhost:3001/api/request \
 curl "http://localhost:3001/api/request?timeout=10"
 ```
 
-### Enviar un prompt directo a Ollama
+### Listar los modelos existente en ollama desde el servicio Node.js: `/api/tags`
+
+- **Propósito:** Obtener el listado de modelos instalados y disponibles en el servicio Ollama.
+- **Método:** GET
+- **Respuesta:**
+  ```json
+  {
+    "models": ["llama3:8b", "otro-modelo", ...]
+  }
+  ```
+- **Ejemplo de uso:**
+  ```bash
+  curl http://localhost:3001/api/tags
+  ```
+- **Uso en frontend:** El portal React permite consultar y visualizar los modelos disponibles usando este endpoint.
+
+### Enviar un prompt directo a ollama desde el servicio Node.js: `/api/ollama`
 ```bash
 curl -X POST http://localhost:3001/api/ollama \
   -H "Content-Type: application/json" \
@@ -234,6 +250,23 @@ Si necesitas variables de entorno para el frontend, crea y edita `react-frontend
 ## Funciones PL/SQL en Oracle
 
 El sistema utiliza dos funciones principales en la base de datos Oracle para la gestión de la cola de prompts:
+
+
+### Variable de entorno: OLLAMA_DEFAULT_MODEL
+
+- **Propósito:** Define el modelo de Ollama que se usará por defecto para generar respuestas si no se especifica uno explícitamente en la API o en la tabla de Oracle.
+- **Valor por defecto:** `llama3:8b`
+- **Cómo modificarla:**
+  - Edita tu archivo `.env` en `node-service` y agrega o cambia la línea:
+    ```env
+    OLLAMA_DEFAULT_MODEL=llama3:8b
+    ```
+  - Puedes poner cualquier modelo disponible en tu instancia de Ollama (ver `/api/tags`).
+- **Uso:**
+  - Si envías un request sin especificar el modelo, se usará el definido en esta variable.
+  - Si la columna `MODEL` en la tabla es null, también se usará este valor.
+
+---
 
 ### 1. `INSERT_PROMPT_REQUEST`
 Inserta un nuevo request en la tabla de la cola.
@@ -509,3 +542,27 @@ curl http://localhost:3001/api/requests
    ```sh
    docker compose up -d
    ```
+
+## Nuevas características de selección de modelo
+
+- La tabla PROMPT_QUEUE ahora tiene una columna `MODEL` (nullable) para almacenar el modelo a usar en cada request.
+- El endpoint `/api/request` y el frontend permiten especificar el modelo a usar; si no se indica, se usa el valor de la variable de entorno `OLLAMA_DEFAULT_MODEL`.
+- Puedes definir el modelo por defecto en tu archivo `.env`:
+  ```env
+  OLLAMA_DEFAULT_MODEL=llama3:8b
+  ```
+- El frontend muestra un selector de modelos disponibles (obtenidos desde `/api/tags`).
+
+### Ejemplo de request con modelo específico
+```bash
+curl -X POST http://localhost:3001/api/request \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usuario": "testuser",
+    "modulo": "MOD1",
+    "transicion": "T1",
+    "prompt_request": "¿Cuál es la capital de Francia?",
+    "model": "llama3:8b"
+  }'
+```
+
