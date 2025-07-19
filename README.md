@@ -424,14 +424,14 @@ Todos los servicios están conectados en la red `ai_bridge_net` para facilitar l
 
 ### Puertos de Oracle XE
 
-- El contenedor de Oracle XE expone el puerto interno 1521 en el puerto **51521** del host:
+- El contenedor de Oracle XE expone el puerto interno 1521 en el puerto **51523** del host:
   ```yaml
   ports:
-    - '51521:1521'
+    - '51523:1521'
   ```
 - Si accedes desde tu máquina host (por ejemplo, con SQL Developer o un cliente externo), usa:
   - **Host:** `localhost`
-  - **Puerto:** `51522`
+  - **Puerto:** `51523`
 - Si accedes desde otro contenedor en la misma red de Docker Compose, usa:
   - **Host:** `oracle-xe`
   - **Puerto:** `1521`
@@ -482,7 +482,7 @@ Con estos pasos puedes garantizar un entorno limpio y funcional ante cualquier e
 ## Parámetros y puertos utilizados
 
 - **Oracle XE:**
-  - Puerto host: 51522
+  - Puerto host: 51523
   - Puerto contenedor: 1521
   - Usuario: system
   - Contraseña: oracle
