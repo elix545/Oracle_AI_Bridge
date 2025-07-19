@@ -1,0 +1,27 @@
+# Node
+node_modules/
+
+# Build
+build/
+dist/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+!.env.example
+
+# Coverage
+coverage/
+
+# Misc
+*.swp
+*.swo
+*.tmp
+*.bak 
