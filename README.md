@@ -55,10 +55,20 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
 ## Uso rápido
 
 1. **Copia y renombra el archivo de entorno:**
-   ```sh
-   cp node-service/.env.example node-service/.env
-   # Edita los valores si es necesario
-   ```
+
+  Antes de levantar los servicios, asegúrate de copiar y renombrar el archivo de entorno de ejemplo a `.env` en cada contenedor que lo requiera:
+
+  Para el backend Node.js:
+  ```sh
+  cp node-service/.env.example node-service/.env
+  ```
+
+  Para el frontend React (si tienes un archivo de ejemplo):
+  ```sh
+  cp react-frontend/.env.example react-frontend/.env
+  ```
+
+  Edita los valores según tu entorno y necesidades.
 
 2. **Levanta todos los servicios:**
    ```sh
@@ -72,6 +82,25 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
    - Envía un prompt a la base de datos (sección "New Request using DB").
    - Envía un prompt directo a Ollama (sección "New Request using Ollama service").
    - Visualiza la cola de prompts y respuestas.
+
+---
+
+## Probar Ollama directamente (curl)
+
+### Listar modelos disponibles
+```bash
+curl http://localhost:11434/api/tags
+```
+
+### Generar respuesta con el modelo llama3:8b
+```bash
+curl -X POST http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3:8b",
+    "prompt": "¿Cuál es la capital de Francia?"
+  }'
+```
 
 ---
 
@@ -155,7 +184,35 @@ Este proyecto está licenciado bajo la Licencia MIT. Consulta el archivo [LICENS
 
 ## Configuración de variables de entorno
 
-El servicio Node.js requiere un archivo `.env` para la conexión a Oracle y Ollama. Un archivo de ejemplo está disponible en `node-service/.env.example`:
+Cada servicio utiliza su propio archivo `.env` localizado en su carpeta correspondiente:
+
+- `node-service/.env` (o `.env.example` como plantilla)
+- `react-frontend/.env` (si es necesario para configuración del frontend)
+
+El archivo `docker-compose.yml` está configurado para usar la opción `env_file` y así cargar automáticamente el archivo `.env` de cada servicio:
+
+```yaml
+  node-service:
+    # ...
+    env_file:
+      - ./node-service/.env
+  react-frontend:
+    # ...
+    env_file:
+      - ./react-frontend/.env
+```
+
+No es necesario un archivo `.env` global en la raíz del proyecto, a menos que quieras definir variables globales para todos los servicios.
+
+### Ejemplo de uso para node-service
+
+Copia el archivo de ejemplo y edítalo según tus necesidades:
+
+```sh
+cp node-service/.env.example node-service/.env
+```
+
+Contenido sugerido para `node-service/.env.example`:
 
 ```env
 # Oracle DB
@@ -170,10 +227,7 @@ OLLAMA_URL=http://ollama:11434
 PORT=3001
 ```
 
-Copia este archivo como `.env` y ajusta los valores si es necesario:
-```sh
-cp node-service/.env.example node-service/.env
-```
+Si necesitas variables de entorno para el frontend, crea y edita `react-frontend/.env` según la documentación de Vite y React.
 
 ## Funciones PL/SQL en Oracle
 
@@ -286,7 +340,8 @@ Este proyecto está diseñado para ser ejecutado fácilmente usando Docker y Doc
 
 - **Construir y levantar todos los servicios:**
   ```sh
-  docker compose up --build
+  #docker compose up --build
+  docker compose build --no-cache
   ```
   Esto construye las imágenes (si es necesario) y levanta los contenedores de Oracle XE, Ollama, Node.js y React.
 
@@ -332,6 +387,22 @@ Este proyecto está diseñado para ser ejecutado fácilmente usando Docker y Doc
 
 Todos los servicios están conectados en la red `ai_bridge_net` para facilitar la comunicación interna.
 
+### Puertos de Oracle XE
+
+- El contenedor de Oracle XE expone el puerto interno 1521 en el puerto **51521** del host:
+  ```yaml
+  ports:
+    - '51521:1521'
+  ```
+- Si accedes desde tu máquina host (por ejemplo, con SQL Developer o un cliente externo), usa:
+  - **Host:** `localhost`
+  - **Puerto:** `51521`
+- Si accedes desde otro contenedor en la misma red de Docker Compose, usa:
+  - **Host:** `oracle-xe`
+  - **Puerto:** `1521`
+
+Asegúrate de actualizar cualquier archivo `.env` o configuración de cliente externo si necesitas conectarte desde fuera del entorno Docker.
+
 ---
 
 ## Troubleshooting: Rebuild y limpieza de contenedores
@@ -358,7 +429,8 @@ Esto elimina todas las imágenes no utilizadas para liberar espacio.
 
 ### 4. Reconstruir y levantar todo desde cero
 ```sh
-docker compose up --build
+#docker compose up --build
+docker compose build --no-cache
 ```
 Esto fuerza la reconstrucción de todas las imágenes y la recreación de los contenedores.
 
@@ -369,5 +441,66 @@ Esto fuerza la reconstrucción de todas las imágenes y la recreación de los co
 > ```
 
 Con estos pasos puedes garantizar un entorno limpio y funcional ante cualquier error o corrupción de datos.
+
+---
+
+## Parámetros y puertos utilizados
+
+- **Oracle XE:**
+  - Puerto host: 51521
+  - Puerto contenedor: 1521
+  - Usuario: system
+  - Contraseña: oracle
+  - SID: xe
+- **Ollama:**
+  - Puerto: 11434
+- **Node.js (API):**
+  - Puerto: 3001
+- **React Frontend:**
+  - Puerto: 5173
+
+## Tiempos de espera recomendados (si usas scripts personalizados)
+- Oracle XE: espera 30 segundos antes de iniciar servicios dependientes
+- Ollama: espera 15 segundos antes de iniciar servicios dependientes
+- Node.js: espera 10 segundos antes de iniciar servicios dependientes
+
+## Ejemplo de uso de la API (curl)
+
+### Insertar un nuevo prompt en la base de datos
+```bash
+curl -X POST http://localhost:3001/api/request \
+  -H "Content-Type: application/json" \
+  -d '{
+    "usuario": "testuser",
+    "modulo": "MOD1",
+    "transicion": "T1",
+    "prompt_request": "¿Cuál es la capital de Francia?"
+  }'
+```
+
+### Leer un prompt pendiente (con timeout de 10 segundos)
+```bash
+curl "http://localhost:3001/api/request?timeout=10"
+```
+
+### Consultar la cola de prompts
+```bash
+curl http://localhost:3001/api/requests
+```
+
+---
+
+## Acceso al portal de React (Frontend)
+
+1. Asegúrate de que todos los servicios estén levantados:
+   ```sh
+   docker compose up -d
+   ```
+2. Abre tu navegador y accede a:
+   - [http://localhost:5173](http://localhost:5173)
+3. Desde el portal puedes:
+   - Enviar nuevos prompts a la base de datos
+   - Enviar prompts directamente a Ollama
+   - Visualizar la cola de prompts y sus respuestas
 
 ---
