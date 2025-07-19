@@ -139,11 +139,20 @@ curl "http://localhost:3001/api/request?timeout=10"
   ```
 - **Uso en frontend:** El portal React permite consultar y visualizar los modelos disponibles usando este endpoint.
 
-### Enviar un prompt directo a ollama desde el servicio Node.js: `/api/ollama`
+### Enviar un prompt directo a Ollama desde el servicio Node.js: `/api/generate`
+
 ```bash
-curl -X POST http://localhost:3001/api/ollama \
+curl -X POST http://localhost:3001/api/generate \
   -H "Content-Type: application/json" \
   -d '{ "prompt": "Resume la historia de Roma" }'
+```
+
+- Puedes especificar el modelo opcionalmente:
+
+```bash
+curl -X POST http://localhost:3001/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{ "prompt": "Resume la historia de Roma", "model": "llama3:8b" }'
 ```
 
 ---
@@ -265,6 +274,19 @@ El sistema utiliza dos funciones principales en la base de datos Oracle para la 
 - **Uso:**
   - Si envías un request sin especificar el modelo, se usará el definido en esta variable.
   - Si la columna `MODEL` en la tabla es null, también se usará este valor.
+
+### Variable de entorno: TIMEOUT_NODE_SERVICE
+
+- **Propósito:** Define el tiempo máximo de espera (en milisegundos) para las llamadas del backend Node.js a Ollama.
+- **Valor por defecto:** 300000 (5 minutos)
+- **Cómo modificarla:**
+  - Edita tu archivo `.env` en `node-service` y agrega o cambia la línea:
+    ```env
+    TIMEOUT_NODE_SERVICE=300000
+    ```
+  - Puedes poner cualquier valor en milisegundos (por ejemplo, 60000 para 1 minuto).
+- **Uso:**
+  - Si Ollama no responde en ese tiempo, la petición fallará con un error de timeout.
 
 ---
 

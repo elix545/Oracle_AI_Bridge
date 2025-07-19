@@ -13,11 +13,23 @@ dotenv.config({
 const app = express();
 app.use(express.json());
 
+// Middleware para loguear todas las peticiones entrantes
+app.use((req, res, next) => {
+  logger.info(`Request: ${req.method} ${req.originalUrl}`, { body: req.body });
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info(`Response: ${req.method} ${req.originalUrl} - Status: ${res.statusCode} (${duration}ms)`);
+  });
+  next();
+});
+
 const ORACLE_USER = process.env.ORACLE_USER || 'system';
 const ORACLE_PASSWORD = process.env.ORACLE_PASSWORD || 'oracle';
 const ORACLE_CONNECT_STRING = process.env.ORACLE_CONNECT_STRING || 'oracle-xe:1521/XE';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'llama3:8b';
+const TIMEOUT_NODE_SERVICE = parseInt(process.env.TIMEOUT_NODE_SERVICE || '300000'); // 5 minutos por defecto
 
 async function getOracleConnection() {
   return await oracledb.getConnection({
@@ -80,13 +92,16 @@ app.post('/api/generate', async (req, res) => {
   const { prompt, model } = req.body;
   const modelToUse = model || OLLAMA_DEFAULT_MODEL;
   try {
-    const response = await axios.post(`${OLLAMA_URL}/api/generate`, {
-      model: modelToUse,
-      prompt,
-    });
+    logger.info(`Llamando a Ollama con modelo: ${modelToUse}`);
+    const response = await axios.post(
+      `${OLLAMA_URL}/api/generate`,
+      { model: modelToUse, prompt },
+      { timeout: TIMEOUT_NODE_SERVICE }
+    );
+    logger.info('Respuesta recibida de Ollama');
     res.json(response.data);
   } catch (err: any) {
-    logger.error('Error al generar respuesta con Ollama', err);
+    logger.error('Error o timeout al generar respuesta con Ollama', err);
     res.status(500).json({ error: err.message });
   }
 });
