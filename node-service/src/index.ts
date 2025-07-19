@@ -42,7 +42,7 @@ app.post('/api/request', async (req, res) => {
     await conn.commit();
     await conn.close();
     res.json({ id: result.outBinds.id });
-  } catch (err) {
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -66,7 +66,7 @@ app.get('/api/request', async (req, res) => {
     const rows = await result.outBinds.outcur.getRows();
     await conn.close();
     res.json({ rows });
-  } catch (err) {
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -79,7 +79,7 @@ app.post('/api/ollama', async (req, res) => {
       prompt
     });
     res.json(response.data);
-  } catch (err) {
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
