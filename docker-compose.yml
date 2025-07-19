@@ -1,0 +1,54 @@
+version: '3.8'
+services:
+  oracle-xe:
+    image: wnameless/oracle-xe-11g-r2
+    container_name: oracle-xe
+    ports:
+      - '1521:1521'
+    volumes:
+      - ./oracle/scripts:/docker-entrypoint-initdb.d
+    networks:
+      - ai_bridge_net
+
+  ollama:
+    build: ./ollama
+    container_name: ollama
+    environment:
+      OLLAMA_MODEL: llama3:8b
+    ports:
+      - '11434:11434'
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    networks:
+      - ai_bridge_net
+
+  node-service:
+    build: ./node-service
+    container_name: node-service
+    depends_on:
+      - oracle-xe
+      - ollama
+    env_file:
+      - .env
+    ports:
+      - '3001:3001'
+    networks:
+      - ai_bridge_net
+
+  react-frontend:
+    build: ./react-frontend
+    container_name: react-frontend
+    depends_on:
+      - node-service
+    env_file:
+      - .env
+    ports:
+      - '5173:5173'
+    networks:
+      - ai_bridge_net
+
+networks:
+  ai_bridge_net:
+    driver: bridge 
