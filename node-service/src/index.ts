@@ -76,11 +76,19 @@ app.get('/api/requests', async (req, res) => {
        FROM PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`
     );
     await conn.close();
-    const rows = result.rows.map((row: any) => ({
-      ...row,
-      MODEL: row.MODEL || OLLAMA_DEFAULT_MODEL,
-    }));
-    res.json(rows);
+    
+    // Validar que result.rows sea un array
+    if (result.rows && Array.isArray(result.rows)) {
+      const rows = result.rows.map((row: any) => ({
+        ...row,
+        MODEL: row.MODEL || OLLAMA_DEFAULT_MODEL,
+      }));
+      logger.info('Sending queue data', { rowCount: rows.length });
+      res.json(rows);
+    } else {
+      logger.error('Oracle result.rows is not an array', { result });
+      res.json([]);
+    }
   } catch (err: any) {
     if (conn) await conn.close();
     logger.error('Error al leer requests de Oracle', err);
@@ -109,11 +117,46 @@ app.post('/api/generate', async (req, res) => {
 app.get('/api/tags', async (req, res) => {
   try {
     const response = await axios.get(`${OLLAMA_URL}/api/tags`);
-    res.json(response.data);
+    logger.info('Ollama tags response received', { 
+      status: response.status, 
+      data: response.data 
+    });
+    
+    // Asegurar que siempre devuelva un formato consistente
+    if (response.data && Array.isArray(response.data.models)) {
+      res.json(response.data);
+    } else {
+      logger.warn('Ollama response format unexpected, returning empty models array', { data: response.data });
+      res.json({ models: [] });
+    }
   } catch (err: any) {
     logger.error('Error al obtener modelos de Ollama', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, models: [] });
   }
+});
+
+// Endpoint para recibir logs del frontend
+app.post('/api/log', async (req, res) => {
+  const { level, message, data, timestamp, userAgent, url } = req.body;
+  
+  // Log con el nivel correspondiente
+  const logMessage = `[FRONTEND-${level.toUpperCase()}] ${timestamp} - ${message}`;
+  
+  switch (level.toLowerCase()) {
+    case 'error':
+      logger.error(logMessage, { data, userAgent, url });
+      break;
+    case 'warn':
+      logger.warn(logMessage, { data, userAgent, url });
+      break;
+    case 'debug':
+      logger.debug(logMessage, { data, userAgent, url });
+      break;
+    default:
+      logger.info(logMessage, { data, userAgent, url });
+  }
+  
+  res.json({ received: true });
 });
 
 const PORT = process.env.PORT || 3001;
