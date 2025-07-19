@@ -3,11 +3,19 @@ services:
     image: wnameless/oracle-xe-11g-r2
     container_name: oracle-xe
     ports:
-      - '1521:1521'
+      - '51521:1521'
     volumes:
       - ./oracle/scripts:/docker-entrypoint-initdb.d
     networks:
       - ai_bridge_net
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2g
+        reservations:
+          cpus: '2.0'
+          memory: 2g
 
   ollama:
     build: ./ollama
