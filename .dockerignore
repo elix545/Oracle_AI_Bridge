@@ -1,0 +1,14 @@
+node_modules
+build
+dist
+.env
+!.env.example
+.DS_Store
+Thumbs.db
+logs
+*.log
+coverage
+*.swp
+*.swo
+*.tmp
+*.bak 
