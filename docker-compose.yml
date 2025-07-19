@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   oracle-xe:
     image: wnameless/oracle-xe-11g-r2
@@ -31,7 +30,7 @@ services:
       - oracle-xe
       - ollama
     env_file:
-      - .env
+      - ./node-service/.env
     ports:
       - '3001:3001'
     networks:
@@ -43,7 +42,7 @@ services:
     depends_on:
       - node-service
     env_file:
-      - .env
+      - ./react-frontend/.env
     ports:
       - '5173:5173'
     networks:
