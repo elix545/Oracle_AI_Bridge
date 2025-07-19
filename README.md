@@ -89,12 +89,12 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
 
 ### Listar modelos disponibles
 ```bash
-curl http://localhost:11434/api/tags
+curl http://localhost:11435/api/tags
 ```
 
 ### Generar respuesta con el modelo llama3:8b
 ```bash
-curl -X POST http://localhost:11434/api/generate \
+curl -X POST http://localhost:11435/api/generate \
   -H "Content-Type: application/json" \
   -d '{
     "model": "llama3:8b",
@@ -173,7 +173,8 @@ curl -X POST http://localhost:3001/api/ollama \
 
 ### Ollama
 - Modelo: llama3:8b (CPU, 4GB RAM mínimo)
-- Puerto: 11434
+- Puerto host: 11435
+- Puerto contenedor: 11434
 
 ### React + Vite
 - Interfaz web para pruebas y monitoreo.
@@ -453,7 +454,8 @@ Con estos pasos puedes garantizar un entorno limpio y funcional ante cualquier e
   - Contraseña: oracle
   - SID: xe
 - **Ollama:**
-  - Puerto: 11434
+  - Puerto host: 11435
+  - Puerto contenedor: 11434
 - **Node.js (API):**
   - Puerto: 3001
 - **React Frontend:**
