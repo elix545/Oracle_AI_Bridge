@@ -8,6 +8,7 @@ interface PromptQueueItem {
   FLAG_COMPLETADO: number;
   PROMPT_REQUEST: string;
   PROMPT_RESPONSE: string;
+  [key: string]: any; // Para permitir campos adicionales
 }
 
 // Error Boundary para capturar errores de React
@@ -68,6 +69,7 @@ const App: React.FC = () => {
   const [ollamaPrompt, setOllamaPrompt] = useState('');
   const [ollamaResponse, setOllamaResponse] = useState('');
   const [queue, setQueue] = useState<PromptQueueItem[]>([]);
+  const [rowResponses, setRowResponses] = useState<{ [id: number]: string }>({});
   const [loading, setLoading] = useState(false);
   const [model, setModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
@@ -82,16 +84,31 @@ const App: React.FC = () => {
     logger.info('Fetching queue from /api/requests');
     try {
       const res = await api.get('/requests');
-      logger.info('Queue response received', { 
-        status: res.status, 
-        dataLength: res.data?.length, 
+      logger.info('Queue response received', {
+        status: res.status,
+        dataLength: res.data?.length,
         dataType: typeof res.data,
-        data: res.data 
+        data: res.data
       });
-      
-      // Validar que res.data sea un array
+      // Corregir mapeo: si es array de arrays, mapear a objetos con claves
+      let rows: PromptQueueItem[] = [];
       if (Array.isArray(res.data)) {
-        setQueue(res.data);
+        if (res.data.length > 0 && Array.isArray(res.data[0])) {
+          // Si es array de arrays, mapear a objetos
+          const keys = [
+            'ID', 'USUARIO', 'MODULO', 'TRANSICION', 'PROMPT_REQUEST', 'PROMPT_RESPONSE',
+            'FLAG_LECTURA', 'FLAG_COMPLETADO', 'FECHA_REQUEST', 'FECHA_RESPONSE', 'FECHA_LECTURA', 'MODEL'
+          ];
+          rows = res.data.map((arr: any[]) => {
+            const obj: any = {};
+            keys.forEach((k, i) => { obj[k] = arr[i]; });
+            return obj;
+          });
+        } else {
+          // Si ya es array de objetos
+          rows = res.data;
+        }
+        setQueue(rows);
         setError(null);
       } else {
         logger.error('Queue response is not an array', { data: res.data });
@@ -242,6 +259,24 @@ const App: React.FC = () => {
     }
   };
 
+  const handleReadRow = async (item: PromptQueueItem) => {
+    setRowResponses(prev => ({ ...prev, [item.ID]: 'Cargando...' }));
+    try {
+      const res = await api.post('/generate', { prompt: item.PROMPT_REQUEST, model: item.MODEL });
+      let responseText = '';
+      if (res.data && res.data.response) {
+        responseText = typeof res.data.response === 'string' ? res.data.response : JSON.stringify(res.data.response);
+      } else if (res.data) {
+        responseText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      } else {
+        responseText = 'No se recibió respuesta';
+      }
+      setRowResponses(prev => ({ ...prev, [item.ID]: responseText }));
+    } catch (err: any) {
+      setRowResponses(prev => ({ ...prev, [item.ID]: `Error: ${err.message}` }));
+    }
+  };
+
   logger.debug('App render state', { 
     queueLength: queue.length, 
     modelsLength: models.length, 
@@ -295,9 +330,16 @@ const App: React.FC = () => {
               Modelo:
               <select value={model} onChange={e => setModel(e.target.value)}>
                 <option value="">(Por defecto)</option>
-                {Array.isArray(models) && models.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
+                {Array.isArray(models) && models.map((m: any, idx: number) => {
+                  const key = typeof m === 'string' ? m : m.model || m.name || idx;
+                  const value = typeof m === 'string' ? m : m.model || m.name || '';
+                  const label = typeof m === 'string' ? m : m.name || m.model || JSON.stringify(m);
+                  return (
+                    <option key={key} value={value}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
             </label>
             <button type="submit" disabled={loading}>
@@ -322,7 +364,11 @@ const App: React.FC = () => {
                 {!Array.isArray(ollamaModels) || ollamaModels.length === 0 ? (
                   <li>No hay modelos instalados.</li>
                 ) : (
-                  ollamaModels.map(m => <li key={m}>{m}</li>)
+                  ollamaModels.map((m: any, idx: number) => (
+                    <li key={m.model || m.name || idx}>
+                      {typeof m === 'string' ? m : m.name || m.model || JSON.stringify(m)}
+                    </li>
+                  ))
                 )}
               </ul>
             </div>
@@ -333,29 +379,39 @@ const App: React.FC = () => {
           <thead>
             <tr>
               <th>ID</th>
-              <th>Module</th>
+              <th>Usuario</th>
+              <th>Modulo</th>
+              <th>Transicion</th>
               <th>Status</th>
               <th>Request</th>
               <th>Response</th>
+              <th>Leer</th>
             </tr>
           </thead>
           <tbody>
-            {!Array.isArray(queue) || queue.length === 0 ? (
+            {Array.isArray(queue) && queue.length > 0 ? (
+              queue.map((item, idx) => (
+                <tr key={item.ID ?? idx}>
+                  <td>{item.ID}</td>
+                  <td>{item.USUARIO}</td>
+                  <td>{item.MODULO}</td>
+                  <td>{item.TRANSICION}</td>
+                  <td>{item.FLAG_COMPLETADO === 1 ? 'Completado' : 'Pendiente'}</td>
+                  <td>{item.PROMPT_REQUEST}</td>
+                  <td>{rowResponses[item.ID] !== undefined ? rowResponses[item.ID] : item.PROMPT_RESPONSE}</td>
+                  <td>
+                    <button onClick={() => handleReadRow(item)}>
+                      Leer
+                    </button>
+                  </td>
+                </tr>
+              ))
+            ) : (
               <tr>
-                <td colSpan={5} style={{ textAlign: 'center', color: '#666' }}>
+                <td colSpan={8} style={{ textAlign: 'center', color: '#666' }}>
                   No hay elementos en la cola
                 </td>
               </tr>
-            ) : (
-              queue.map(item => (
-                <tr key={item.ID}>
-                  <td>{item.ID}</td>
-                  <td>{item.MODULO}</td>
-                  <td>{item.FLAG_COMPLETADO === 1 ? 'Completado' : 'Pendiente'}</td>
-                  <td>{item.PROMPT_REQUEST}</td>
-                  <td>{item.PROMPT_RESPONSE}</td>
-                </tr>
-              ))
             )}
           </tbody>
         </table>

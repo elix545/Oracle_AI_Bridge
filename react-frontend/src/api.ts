@@ -4,7 +4,7 @@ import logger from './logger';
 // Configurar Axios para usar el proxy de Vite
 const api = axios.create({
   baseURL: '/api', // Usar el proxy de Vite
-  timeout: 10000,
+  timeout: 300000, // 5 minutos
   headers: {
     'Content-Type': 'application/json',
   },

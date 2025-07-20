@@ -81,7 +81,9 @@ app.get('/api/requests', async (req, res) => {
     conn = await getOracleConnection();
     const result = await conn.execute(
       `SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, PROMPT_RESPONSE, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
-       FROM middleware.PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`
+       FROM middleware.PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     await conn.close();
     
