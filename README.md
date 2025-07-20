@@ -54,34 +54,40 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
 
 ## Uso rápido
 
-1. **Copia y renombra el archivo de entorno:**
-
-  Antes de levantar los servicios, asegúrate de copiar y renombrar el archivo de entorno de ejemplo a `.env` en cada contenedor que lo requiera:
-
-  Para el backend Node.js:
-  ```sh
-  cp node-service/.env.example node-service/.env
-  ```
-
-  Para el frontend React (si tienes un archivo de ejemplo):
-  ```sh
-  cp react-frontend/.env.example react-frontend/.env
-  ```
-
-  Edita los valores según tu entorno y necesidades.
-
-2. **Levanta todos los servicios:**
+1. **Levanta todos los servicios:**
    ```sh
-   docker compose up --build
+   docker compose up --build -d
    ```
 
-3. **Accede al frontend:**
+2. **Accede al frontend:**
    - [http://localhost:5173](http://localhost:5173)
 
-4. **Prueba la funcionalidad:**
+3. **Prueba la funcionalidad:**
    - Envía un prompt a la base de datos (sección "New Request using DB").
    - Envía un prompt directo a Ollama (sección "New Request using Ollama service").
    - Visualiza la cola de prompts y respuestas.
+
+---
+
+## Configuración de Oracle
+
+### Usuario Middleware
+El sistema utiliza un usuario Oracle dedicado llamado `middleware` con las siguientes características:
+
+- **Usuario**: `middleware`
+- **Contraseña**: `oracle`
+- **Privilegios**: CONNECT, RESOURCE, CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE PROCEDURE, UNLIMITED TABLESPACE
+
+### Objetos de Base de Datos
+Todos los objetos se crean en el esquema `middleware`:
+
+- **Tabla**: `middleware.PROMPT_QUEUE`
+- **Secuencia**: `middleware.PROMPT_QUEUE_SEQ`
+- **Funciones**: `middleware.INSERT_PROMPT_REQUEST`, `middleware.READ_PROMPT_REQUEST`
+- **Job de limpieza**: `PROMPT_QUEUE_CLEANUP` (elimina registros de más de 30 días)
+
+### Conexión Oracle
+El sistema utiliza el modo **Thick** de node-oracledb para compatibilidad con Oracle 11g, incluyendo Oracle Instant Client en el contenedor.
 
 ---
 
@@ -114,13 +120,14 @@ curl -X POST http://localhost:3001/api/request \
     "usuario": "testuser",
     "modulo": "MOD1",
     "transicion": "T1",
-    "prompt_request": "¿Cuál es la capital de Francia?"
+    "prompt_request": "¿Cuál es la capital de Francia?",
+    "model": "llama3:8b"
   }'
 ```
 
-### Leer un prompt pendiente (con timeout de 10 segundos)
+### Consultar todos los prompts
 ```bash
-curl "http://localhost:3001/api/request?timeout=10"
+curl http://localhost:3001/api/requests
 ```
 
 ### Listar los modelos existente en ollama desde el servicio Node.js: `/api/tags`
@@ -188,13 +195,15 @@ curl -X POST http://localhost:3001/api/generate \
 
 ### Oracle XE 11g
 - Imagen: `wnameless/oracle-xe-11g-r2`
-- Usuario: `system` / Contraseña: `oracle` / SID: `xe`
-- El script `init.sql` crea la tabla, secuencia, funciones y job de limpieza mensual.
+- Usuario: `middleware` / Contraseña: `oracle` / SID: `xe`
+- El script `init.sql` crea el usuario middleware, tabla, secuencia, funciones y job de limpieza mensual.
+- Modo de conexión: Thick mode con Oracle Instant Client
 
 ### Node.js Service
 - Conecta a Oracle y Ollama.
 - Expone endpoints REST para insertar y leer requests.
 - Lee variables de entorno desde `.env` o el sistema.
+- Configurado para usar el usuario `middleware` de Oracle.
 
 ### Ollama
 - Modelo: llama3:8b (CPU, 8GB RAM mínimo, 4 núcleos)
@@ -243,348 +252,52 @@ Contenido sugerido para `node-service/.env.example`:
 
 ```env
 # Oracle DB
-ORACLE_USER=system
+ORACLE_USER=middleware
 ORACLE_PASSWORD=oracle
 ORACLE_CONNECT_STRING=oracle-xe:1521/XE
 
 # Ollama
 OLLAMA_URL=http://ollama:11434
+OLLAMA_DEFAULT_MODEL=llama3:8b
 
-# Puerto del servicio
+# Service Configuration
 PORT=3001
+TIMEOUT_NODE_SERVICE=300000
 ```
 
-Si necesitas variables de entorno para el frontend, crea y edita `react-frontend/.env` según la documentación de Vite y React.
+## Solución de problemas
 
-## Funciones PL/SQL en Oracle
+### Error NJS-138: Oracle Thin mode no compatible
+Si encuentras el error `NJS-138: connections to this database server version are not supported by node-oracledb in Thin mode`, el sistema ya está configurado para usar el modo Thick con Oracle Instant Client.
 
-El sistema utiliza dos funciones principales en la base de datos Oracle para la gestión de la cola de prompts:
+### Verificar conexión Oracle
+Para verificar que la conexión Oracle funciona correctamente:
 
-
-### Variable de entorno: OLLAMA_DEFAULT_MODEL
-
-- **Propósito:** Define el modelo de Ollama que se usará por defecto para generar respuestas si no se especifica uno explícitamente en la API o en la tabla de Oracle.
-- **Valor por defecto:** `llama3:8b`
-- **Cómo modificarla:**
-  - Edita tu archivo `.env` en `node-service` y agrega o cambia la línea:
-    ```env
-    OLLAMA_DEFAULT_MODEL=llama3:8b
-    ```
-  - Puedes poner cualquier modelo disponible en tu instancia de Ollama (ver `/api/tags`).
-- **Uso:**
-  - Si envías un request sin especificar el modelo, se usará el definido en esta variable.
-  - Si la columna `MODEL` en la tabla es null, también se usará este valor.
-
-### Variable de entorno: TIMEOUT_NODE_SERVICE
-
-- **Propósito:** Define el tiempo máximo de espera (en milisegundos) para las llamadas del backend Node.js a Ollama.
-- **Valor por defecto:** 300000 (5 minutos)
-- **Cómo modificarla:**
-  - Edita tu archivo `.env` en `node-service` y agrega o cambia la línea:
-    ```env
-    TIMEOUT_NODE_SERVICE=300000
-    ```
-  - Puedes poner cualquier valor en milisegundos (por ejemplo, 60000 para 1 minuto).
-- **Uso:**
-  - Si Ollama no responde en ese tiempo, la petición fallará con un error de timeout.
-
----
-
-### 1. `INSERT_PROMPT_REQUEST`
-Inserta un nuevo request en la tabla de la cola.
-
-**Definición:**
-```sql
-CREATE OR REPLACE FUNCTION INSERT_PROMPT_REQUEST(
-  P_USUARIO IN VARCHAR2,
-  P_MODULO IN VARCHAR2,
-  P_TRANSICION IN VARCHAR2,
-  P_PROMPT_REQUEST IN VARCHAR2
-) RETURN NUMBER;
-```
-
-**Uso desde SQL:**
-```sql
-DECLARE
-  v_id NUMBER;
-BEGIN
-  v_id := INSERT_PROMPT_REQUEST('usuario1', 'MOD1', 'T1', '¿Cuál es la capital de Francia?');
-  DBMS_OUTPUT.PUT_LINE('ID generado: ' || v_id);
-END;
-```
-
-### 2. `READ_PROMPT_REQUEST`
-Lee el siguiente request pendiente de la cola, con timeout y reintentos.
-
-**Definición:**
-```sql
-CREATE OR REPLACE FUNCTION READ_PROMPT_REQUEST(
-  P_TIMEOUT_SECONDS IN NUMBER DEFAULT 10
-) RETURN SYS_REFCURSOR;
-```
-
-**Uso desde SQL:**
-```sql
-DECLARE
-  cur SYS_REFCURSOR;
-  rec PROMPT_QUEUE%ROWTYPE;
-BEGIN
-  cur := READ_PROMPT_REQUEST(10);
-  LOOP
-    FETCH cur INTO rec;
-    EXIT WHEN cur%NOTFOUND;
-    DBMS_OUTPUT.PUT_LINE('ID: ' || rec.ID || ' - Request: ' || rec.PROMPT_REQUEST);
-  END LOOP;
-  CLOSE cur;
-END;
-```
-
----
-
-## Ejemplo de uso desde Oracle Forms 6i y Forms 12c
-
-### Insertar un request desde Forms (PL/SQL Block)
-```plsql
-DECLARE
-  v_id NUMBER;
-BEGIN
-  v_id := INSERT_PROMPT_REQUEST(:USUARIO, :MODULO, :TRANSICION, :PROMPT_REQUEST);
-  :ID_GENERADO := v_id;
-END;
-```
-
-### Leer un request pendiente desde Forms (PL/SQL Block)
-```plsql
-DECLARE
-  cur SYS_REFCURSOR;
-  v_id NUMBER;
-  v_usuario VARCHAR2(35);
-  v_modulo VARCHAR2(4);
-  v_transicion VARCHAR2(4);
-  v_prompt_request VARCHAR2(4000);
-  v_prompt_response VARCHAR2(4000);
-  v_flag_lectura NUMBER;
-  v_flag_completado NUMBER;
-  v_fecha_request DATE;
-  v_fecha_response DATE;
-  v_fecha_lectura DATE;
-BEGIN
-  cur := READ_PROMPT_REQUEST(10);
-  LOOP
-    FETCH cur INTO v_id, v_usuario, v_modulo, v_transicion, v_prompt_request, v_prompt_response, v_flag_lectura, v_flag_completado, v_fecha_request, v_fecha_response, v_fecha_lectura;
-    EXIT WHEN cur%NOTFOUND;
-    -- Asignar a items de Forms o procesar
-    :ID := v_id;
-    :USUARIO := v_usuario;
-    :MODULO := v_modulo;
-    :PROMPT_REQUEST := v_prompt_request;
-    :PROMPT_RESPONSE := v_prompt_response;
-    -- ...
-  END LOOP;
-  CLOSE cur;
-END;
-```
-
-> **Nota:** Los nombres de los items (`:USUARIO`, `:MODULO`, etc.) deben coincidir con los campos de tu formulario en Forms 6i o 12c.
-
----
-
-## Uso de Docker y Docker Compose
-
-Este proyecto está diseñado para ser ejecutado fácilmente usando Docker y Docker Compose, lo que permite levantar todos los servicios necesarios con un solo comando.
-
-### Comandos principales
-
-- **Construir y levantar todos los servicios:**
-  ```sh
-  #docker compose up --build
-  docker compose build --no-cache
-  ```
-  Esto construye las imágenes (si es necesario) y levanta los contenedores de Oracle XE, Ollama, Node.js y React.
-
-- **Levantar servicios en segundo plano:**
-  ```sh
-  docker compose up -d
-  ```
-
-- **Detener todos los servicios:**
-  ```sh
-  docker compose down
-  ```
-
-- **Eliminar volúmenes y datos persistentes (útil para reinicializar Oracle):**
-  ```sh
-  docker compose down -v
-  ```
-
-### Descripción de los servicios en `docker-compose.yml`
-
-- **oracle-xe**
-  - Imagen: `wnameless/oracle-xe-11g-r2`
-  - Expone el puerto 1521 para conexiones SQL.
-  - Monta los scripts de inicialización en `/docker-entrypoint-initdb.d`.
-  - Almacena los datos en un volumen persistente.
-
-- **ollama**
-  - Construido desde el Dockerfile en `ollama/`.
-  - Usa el modelo `llama3:8b` en CPU, limitado a 4GB de RAM.
-  - Expone el puerto 11434 para la API de Ollama.
-
-- **node-service**
-  - Construido desde el Dockerfile en `node-service/`.
-  - Depende de Oracle y Ollama.
-  - Usa variables de entorno desde `.env`.
-  - Expone el puerto 3001 para la API REST.
-
-- **react-frontend**
-  - Construido desde el Dockerfile en `react-frontend/`.
-  - Depende de node-service.
-  - Usa variables de entorno desde `.env`.
-  - Expone el puerto 5173 para la interfaz web.
-
-Todos los servicios están conectados en la red `ai_bridge_net` para facilitar la comunicación interna.
-
-### Puertos de Oracle XE
-
-- El contenedor de Oracle XE expone el puerto interno 1521 en el puerto **1621** del host:
-  ```yaml
-  ports:
-    - '1621:1521'
-  ```
-- Si accedes desde tu máquina host (por ejemplo, con SQL Developer o un cliente externo), usa:
-  - **Host:** `localhost`
-  - **Puerto:** `1621`
-- Si accedes desde otro contenedor en la misma red de Docker Compose, usa:
-  - **Host:** `oracle-xe`
-  - **Puerto:** `1521`
-
-Asegúrate de actualizar cualquier archivo `.env` o configuración de cliente externo si necesitas conectarte desde fuera del entorno Docker.
-
----
-
-## Troubleshooting: Rebuild y limpieza de contenedores
-
-Si ocurre algún error o necesitas reiniciar completamente el entorno, puedes detener, eliminar y reconstruir todos los contenedores y volúmenes de la siguiente manera:
-
-### 1. Detener todos los contenedores
-```sh
-docker compose down
-```
-Esto detiene y elimina todos los contenedores definidos en el `docker-compose.yml`.
-
-### 2. Eliminar volúmenes y datos persistentes
-```sh
-docker compose down -v
-```
-Esto elimina también los volúmenes asociados (por ejemplo, los datos de Oracle), permitiendo una inicialización limpia.
-
-### 3. (Opcional) Eliminar imágenes antiguas
-```sh
-docker image prune -a
-```
-Esto elimina todas las imágenes no utilizadas para liberar espacio.
-
-### 4. Reconstruir y levantar todo desde cero
-```sh
-#docker compose up --build
-docker compose build --no-cache
-```
-Esto fuerza la reconstrucción de todas las imágenes y la recreación de los contenedores.
-
-> **Nota:** Si tienes contenedores fuera de Docker Compose, puedes detenerlos todos con:
-> ```sh
-> docker stop $(docker ps -aq)
-> docker rm $(docker ps -aq)
-> ```
-
-Con estos pasos puedes garantizar un entorno limpio y funcional ante cualquier error o corrupción de datos.
-
----
-
-## Parámetros y puertos utilizados
-
-- **Oracle XE:**
-  - Puerto host: 1621
-  - Puerto contenedor: 1521
-  - Usuario: system
-  - Contraseña: oracle
-  - SID: xe
-- **Ollama:**
-  - Puerto host: 11435
-  - Puerto contenedor: 11434
-- **Node.js (API):**
-  - Puerto: 3001
-- **React Frontend:**
-  - Puerto: 5173
-
-## Tiempos de espera recomendados (si usas scripts personalizados)
-- Oracle XE: espera 30 segundos antes de iniciar servicios dependientes
-- Ollama: espera 15 segundos antes de iniciar servicios dependientes
-- Node.js: espera 10 segundos antes de iniciar servicios dependientes
-
-## Frecuencia de lectura del servicio Node.js a Oracle
-
-- El servicio Node.js realiza polling a la base de datos Oracle para leer nuevos requests.
-- Por defecto, el intervalo de polling es de **10 segundos** (configurable mediante el parámetro `timeout` en la API o ajustando el código del servicio).
-- Puedes cambiar este valor modificando el parámetro en la llamada a la API:
-  ```bash
-  curl "http://localhost:3001/api/request?timeout=15"
-  ```
-- El valor por defecto está pensado para balancear carga y latencia, pero puedes ajustarlo según tus necesidades.
-
-## Ejemplo de uso de la API (curl)
-
-### Insertar un nuevo prompt en la base de datos
 ```bash
-curl -X POST http://localhost:3001/api/request \
-  -H "Content-Type: application/json" \
-  -d '{
-    "usuario": "testuser",
-    "modulo": "MOD1",
-    "transicion": "T1",
-    "prompt_request": "¿Cuál es la capital de Francia?"
-  }'
-```
-
-### Leer un prompt pendiente (con timeout de 10 segundos)
-```bash
-curl "http://localhost:3001/api/request?timeout=10"
-```
-
-### Consultar la cola de prompts
-```bash
+# Verificar que el endpoint responde sin errores
 curl http://localhost:3001/api/requests
-```
 
----
-
-## Acceso al portal de React (Frontend)
-
-1. Asegúrate de que todos los servicios estén levantados:
-   ```sh
-   docker compose up -d
-   ```
-
-## Nuevas características de selección de modelo
-
-- La tabla PROMPT_QUEUE ahora tiene una columna `MODEL` (nullable) para almacenar el modelo a usar en cada request.
-- El endpoint `/api/request` y el frontend permiten especificar el modelo a usar; si no se indica, se usa el valor de la variable de entorno `OLLAMA_DEFAULT_MODEL`.
-- Puedes definir el modelo por defecto en tu archivo `.env`:
-  ```env
-  OLLAMA_DEFAULT_MODEL=llama3:8b
-  ```
-- El frontend muestra un selector de modelos disponibles (obtenidos desde `/api/tags`).
-
-### Ejemplo de request con modelo específico
-```bash
+# Insertar un registro de prueba
 curl -X POST http://localhost:3001/api/request \
   -H "Content-Type: application/json" \
   -d '{
-    "usuario": "testuser",
-    "modulo": "MOD1",
-    "transicion": "T1",
-    "prompt_request": "¿Cuál es la capital de Francia?",
+    "usuario": "test",
+    "modulo": "TEST",
+    "transicion": "TEST",
+    "prompt_request": "Test prompt",
     "model": "llama3:8b"
   }'
+```
+
+### Logs de los servicios
+```bash
+# Ver logs de Oracle
+docker-compose logs oracle-xe
+
+# Ver logs del node-service
+docker-compose logs node-service
+
+# Ver logs de Ollama
+docker-compose logs ollama
 ```
 
