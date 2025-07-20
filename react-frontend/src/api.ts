@@ -1,9 +1,9 @@
 import axios from 'axios';
 import logger from './logger';
 
-// Configurar Axios para usar la URL base correcta
+// Configurar Axios para usar el proxy de Vite
 const api = axios.create({
-  baseURL: 'http://localhost:3001/api',
+  baseURL: '/api', // Usar el proxy de Vite
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
