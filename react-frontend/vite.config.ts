@@ -8,9 +8,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: process.env.NODE_ENV === 'production' 
-          ? 'http://node-service:3001' 
-          : 'http://localhost:3001',
+        target: 'http://node-service:3001',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path,

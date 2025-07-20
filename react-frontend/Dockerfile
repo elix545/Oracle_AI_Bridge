@@ -6,6 +6,7 @@ RUN npm install --include=dev
 COPY . .
 ENV PATH="/app/node_modules/.bin:$PATH"
 RUN ls -l /app/node_modules/.bin && node /app/node_modules/vite/bin/vite.js --version
-RUN npm run build
+# No necesitamos build para desarrollo
 EXPOSE 5173
-CMD ["npm", "run", "preview", "--", "--host"] 
+# Usar vite dev en lugar de preview para que el proxy funcione
+CMD ["npm", "run", "dev", "--", "--host", "--port", "5173"] 
