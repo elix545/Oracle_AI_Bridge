@@ -3,7 +3,7 @@ import logger from './logger';
 
 // Configurar Axios para usar la URL base correcta
 const api = axios.create({
-  baseURL: 'http://localhost:3000/api',
+  baseURL: 'http://localhost:3001/api',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
