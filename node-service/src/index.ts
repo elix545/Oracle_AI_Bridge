@@ -10,6 +10,9 @@ dotenv.config({
   path: fs.existsSync(path.resolve(__dirname, '../.env')) ? path.resolve(__dirname, '../.env') : undefined
 });
 
+// Configure oracledb to use Thick mode for Oracle 11g compatibility
+oracledb.initOracleClient();
+
 const app = express();
 app.use(express.json());
 
@@ -24,7 +27,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const ORACLE_USER = process.env.ORACLE_USER || 'system';
+const ORACLE_USER = process.env.ORACLE_USER || 'middleware';
 const ORACLE_PASSWORD = process.env.ORACLE_PASSWORD || 'oracle';
 const ORACLE_CONNECT_STRING = process.env.ORACLE_CONNECT_STRING || 'oracle-xe:1521/XE';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
@@ -35,7 +38,12 @@ async function getOracleConnection() {
   return await oracledb.getConnection({
     user: ORACLE_USER,
     password: ORACLE_PASSWORD,
-    connectString: ORACLE_CONNECT_STRING
+    connectString: ORACLE_CONNECT_STRING,
+    // Additional options for Oracle 11g compatibility
+    events: false,
+    poolMin: 0,
+    poolMax: 4,
+    poolIncrement: 1
   });
 }
 
@@ -45,8 +53,8 @@ app.post('/api/request', async (req, res) => {
   try {
     conn = await getOracleConnection();
     const result = await conn.execute(
-      `INSERT INTO PROMPT_QUEUE (ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, MODEL)
-       VALUES (PROMPT_QUEUE_SEQ.NEXTVAL, :usuario, :modulo, :transicion, :prompt_request, 0, 0, SYSDATE, :model)
+      `INSERT INTO middleware.PROMPT_QUEUE (ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, MODEL)
+       VALUES (middleware.PROMPT_QUEUE_SEQ.NEXTVAL, :usuario, :modulo, :transicion, :prompt_request, 0, 0, SYSDATE, :model)
        RETURNING ID INTO :id`,
       {
         usuario,
@@ -73,7 +81,7 @@ app.get('/api/requests', async (req, res) => {
     conn = await getOracleConnection();
     const result = await conn.execute(
       `SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, PROMPT_RESPONSE, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
-       FROM PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`
+       FROM middleware.PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`
     );
     await conn.close();
     
