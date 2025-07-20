@@ -199,7 +199,18 @@ const App: React.FC = () => {
       logger.info('Sending POST to /api/generate', { prompt: ollamaPrompt });
       const res = await api.post('/generate', { prompt: ollamaPrompt });
       logger.info('Ollama response received', { status: res.status, responseLength: res.data?.response?.length });
-      setOllamaResponse(res.data.response || JSON.stringify(res.data));
+      
+      // Asegurar que la respuesta sea siempre una cadena de texto
+      let responseText = '';
+      if (res.data && res.data.response) {
+        responseText = typeof res.data.response === 'string' ? res.data.response : JSON.stringify(res.data.response);
+      } else if (res.data) {
+        responseText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      } else {
+        responseText = 'No se recibió respuesta';
+      }
+      
+      setOllamaResponse(responseText);
     } catch (err: any) {
       logger.error('Error submitting Ollama request', { error: err.message, status: err.response?.status });
       setOllamaResponse(`Error: ${err.message}`);
@@ -299,7 +310,7 @@ const App: React.FC = () => {
             <button type="submit" disabled={loading}>
               {loading ? 'Enviando...' : 'Enviar a Ollama'}
             </button>
-            <div><b>Respuesta:</b><br />{ollamaResponse}</div>
+            <div><b>Respuesta:</b><br />{typeof ollamaResponse === 'string' ? ollamaResponse : JSON.stringify(ollamaResponse)}</div>
           </form>
         </div>
         <div style={{ margin: '24px 0' }}>
