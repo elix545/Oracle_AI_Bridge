@@ -83,7 +83,7 @@ app.get('/api/requests', async (req, res) => {
       `SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, PROMPT_RESPONSE, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
        FROM middleware.PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`,
       [],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchAsString: [oracledb.CLOB] }
     );
     await conn.close();
     
@@ -119,7 +119,7 @@ app.post('/api/generate', async (req, res) => {
       const result = await conn.execute(
         `SELECT PROMPT_RESPONSE FROM middleware.PROMPT_QUEUE WHERE ID = :id`,
         { id },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchAsString: [oracledb.CLOB] }
       );
       await conn.close();
       if (result.rows && result.rows.length > 0 && result.rows[0].PROMPT_RESPONSE) {
