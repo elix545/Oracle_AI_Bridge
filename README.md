@@ -46,6 +46,8 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
 │   └── src/
 │       ├── App.tsx
 │       └── main.tsx
+├── sqlplus/
+│   └── SQLPLUS.md
 ```
 
 ## Requisitos
