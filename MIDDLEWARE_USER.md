@@ -31,7 +31,7 @@ CREATE TABLE middleware.PROMPT_QUEUE (
   MODULO VARCHAR2(4),
   TRANSICION VARCHAR2(4),
   PROMPT_REQUEST VARCHAR2(4000),
-  PROMPT_RESPONSE VARCHAR2(4000),
+  PROMPT_RESPONSE CLOB,
   FLAG_LECTURA NUMBER(1) DEFAULT 0,
   FLAG_COMPLETADO NUMBER(1) DEFAULT 0,
   FECHA_REQUEST DATE DEFAULT SYSDATE,
@@ -250,4 +250,8 @@ Si anteriormente usabas el usuario `SYSTEM`, la migración es automática:
 2. **Todos los objetos se crean en el esquema `middleware`**
 3. **El Node.js service se configura automáticamente para usar `middleware`**
 
-No es necesario migrar datos existentes ya que el sistema está diseñado para usar el nuevo usuario desde el inicio. 
+No es necesario migrar datos existentes ya que el sistema está diseñado para usar el nuevo usuario desde el inicio.
+
+## Notas sobre CLOB
+
+La columna PROMPT_RESPONSE ahora es de tipo CLOB para soportar respuestas largas de modelos de IA. El backend Node.js está configurado para leer y escribir CLOBs automáticamente usando la opción fetchAsString de node-oracledb. 

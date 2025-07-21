@@ -301,3 +301,68 @@ docker-compose logs node-service
 docker-compose logs ollama
 ```
 
+### Notas sobre CLOB
+
+La columna PROMPT_RESPONSE es ahora de tipo CLOB para soportar respuestas largas de IA. El backend Node.js está configurado para leer y escribir CLOBs automáticamente usando la opción fetchAsString de node-oracledb.
+
+## Uso de Docker Compose: build, up y down de contenedores específicos
+
+Docker Compose permite gestionar los servicios de forma individual o conjunta. Aquí tienes ejemplos prácticos para cada contenedor:
+
+### Build de un contenedor específico
+
+```sh
+# Build solo del backend Node.js
+docker compose build node-service
+
+# Build solo del frontend React
+docker compose build react-frontend
+
+# Build solo de Ollama
+docker compose build ollama
+
+# Build solo de Oracle XE
+docker compose build oracle-xe
+```
+
+### Levantar (up) un contenedor específico
+
+```sh
+# Levantar solo Oracle XE
+docker compose up -d oracle-xe
+
+# Levantar solo Ollama
+docker compose up -d ollama
+
+# Levantar solo el backend Node.js
+docker compose up -d node-service
+
+# Levantar solo el frontend React
+docker compose up -d react-frontend
+```
+
+### Detener (down) un contenedor específico
+
+```sh
+# Detener solo Oracle XE
+docker compose stop oracle-xe
+
+# Detener solo Ollama
+docker compose stop ollama
+
+# Detener solo el backend Node.js
+docker compose stop node-service
+
+# Detener solo el frontend React
+docker compose stop react-frontend
+```
+
+### Eliminar (down) todos los servicios y recursos
+
+```sh
+# Detener y eliminar todos los contenedores, redes y volúmenes definidos en docker-compose.yml
+docker compose down
+```
+
+> **Nota:** Puedes combinar los comandos para build, up y down según tus necesidades de desarrollo o despliegue.
+

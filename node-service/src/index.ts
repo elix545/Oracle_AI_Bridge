@@ -146,7 +146,11 @@ app.post('/api/generate', async (req, res) => {
     if (id) {
       let conn;
       try {
-        logger.info(`[PROMPT_RESPONSE][UPDATE] Intentando actualizar PROMPT_QUEUE`, { id, response: response.data.response || JSON.stringify(response.data) });
+        logger.info(`[PROMPT_RESPONSE][DEBUG] Intentando guardar en PROMPT_RESPONSE para ID ${id}:`, {
+          type: typeof response.data.response,
+          length: response.data.response?.length,
+          preview: typeof response.data.response === 'string' ? response.data.response.substring(0, 200) : JSON.stringify(response.data.response).substring(0, 200)
+        });
         conn = await getOracleConnection();
         const updateResult = await conn.execute(
           `UPDATE middleware.PROMPT_QUEUE SET PROMPT_RESPONSE = :response, FECHA_RESPONSE = SYSDATE, FLAG_COMPLETADO = 1 WHERE ID = :id`,
@@ -154,6 +158,7 @@ app.post('/api/generate', async (req, res) => {
         );
         await conn.commit();
         await conn.close();
+        logger.info(`[PROMPT_RESPONSE][DEBUG] Resultado de update para ID ${id}:`, { updateResult });
         logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update`, { id, rowsAffected: updateResult.rowsAffected, updateResult });
         if (!updateResult.rowsAffected) {
           logger.warn(`[PROMPT_RESPONSE][UPDATE] No se actualizó ninguna fila para ID`, { id });
