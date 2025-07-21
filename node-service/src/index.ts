@@ -107,8 +107,32 @@ app.get('/api/requests', async (req, res) => {
 });
 
 app.post('/api/generate', async (req, res) => {
-  const { prompt, model } = req.body;
+  const { prompt, model, id } = req.body;
+  logger.info(`[PROMPT_RESPONSE] Valor recibido de id en /api/generate:`, { id });
   const modelToUse = model || OLLAMA_DEFAULT_MODEL;
+
+  // Si se recibe un ID, primero consultar si ya existe PROMPT_RESPONSE
+  if (id) {
+    let conn;
+    try {
+      conn = await getOracleConnection();
+      const result = await conn.execute(
+        `SELECT PROMPT_RESPONSE FROM middleware.PROMPT_QUEUE WHERE ID = :id`,
+        { id },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      await conn.close();
+      if (result.rows && result.rows.length > 0 && result.rows[0].PROMPT_RESPONSE) {
+        logger.info(`[PROMPT_RESPONSE][CACHE] PROMPT_RESPONSE ya existe para ID`, { id });
+        return res.json({ response: result.rows[0].PROMPT_RESPONSE });
+      }
+    } catch (err: any) {
+      if (conn) await conn.close();
+      logger.error(`[PROMPT_RESPONSE][CACHE][ERROR] Error al consultar PROMPT_RESPONSE en Oracle`, { id, error: err.message });
+      // Si hay error, continuar con el flujo normal
+    }
+  }
+
   try {
     logger.info(`Llamando a Ollama con modelo: ${modelToUse}`);
     const response = await axios.post(
@@ -117,6 +141,31 @@ app.post('/api/generate', async (req, res) => {
       { timeout: TIMEOUT_NODE_SERVICE }
     );
     logger.info('Respuesta recibida de Ollama');
+
+    // Si se recibe un ID, guardar la respuesta en la base de datos
+    if (id) {
+      let conn;
+      try {
+        logger.info(`[PROMPT_RESPONSE][UPDATE] Intentando actualizar PROMPT_QUEUE`, { id, response: response.data.response || JSON.stringify(response.data) });
+        conn = await getOracleConnection();
+        const updateResult = await conn.execute(
+          `UPDATE middleware.PROMPT_QUEUE SET PROMPT_RESPONSE = :response, FECHA_RESPONSE = SYSDATE, FLAG_COMPLETADO = 1 WHERE ID = :id`,
+          { response: response.data.response || JSON.stringify(response.data), id }
+        );
+        await conn.commit();
+        await conn.close();
+        logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update`, { id, rowsAffected: updateResult.rowsAffected, updateResult });
+        if (!updateResult.rowsAffected) {
+          logger.warn(`[PROMPT_RESPONSE][UPDATE] No se actualizó ninguna fila para ID`, { id });
+        } else {
+          logger.info(`[PROMPT_RESPONSE][UPDATE] PROMPT_RESPONSE actualizado correctamente para ID`, { id });
+        }
+      } catch (dbErr: any) {
+        if (conn) await conn.close();
+        logger.error(`[PROMPT_RESPONSE][UPDATE][ERROR] Error al actualizar PROMPT_RESPONSE en Oracle`, { id, error: dbErr.message, stack: dbErr.stack });
+      }
+    }
+
     res.json(response.data);
   } catch (err: any) {
     logger.error('Error o timeout al generar respuesta con Ollama', err);
