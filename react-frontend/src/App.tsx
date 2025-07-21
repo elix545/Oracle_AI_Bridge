@@ -84,11 +84,11 @@ const App: React.FC = () => {
     logger.info('Fetching queue from /api/requests');
     try {
       const res = await api.get('/requests');
-      logger.info('Queue response received', {
-        status: res.status,
-        dataLength: res.data?.length,
+      logger.info('Queue response received', { 
+        status: res.status, 
+        dataLength: res.data?.length, 
         dataType: typeof res.data,
-        data: res.data
+        data: res.data 
       });
       // Corregir mapeo: si es array de arrays, mapear a objetos con claves
       let rows: PromptQueueItem[] = [];
@@ -180,6 +180,21 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Mostrar automáticamente los responses ya procesados en la tabla
+  useEffect(() => {
+    if (Array.isArray(queue) && queue.length > 0) {
+      setRowResponses(prev => {
+        const updated: { [id: number]: string } = { ...prev };
+        queue.forEach(item => {
+          if (item.PROMPT_RESPONSE && !updated[item.ID]) {
+            updated[item.ID] = item.PROMPT_RESPONSE;
+          }
+        });
+        return updated;
+      });
+    }
+  }, [queue]);
+
   const handleDbRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     logger.info('Submitting DB request', { formData: dbRequest, selectedModel: model });
@@ -193,12 +208,18 @@ const App: React.FC = () => {
       };
       logger.info('Sending POST to /api/request', requestData);
       
-      await api.post('/request', requestData);
+      const res = await api.post('/request', requestData);
       logger.info('DB request submitted successfully');
       
       setDbRequest({ usuario: '', modulo: '', transicion: '', prompt_request: '' });
       setModel('');
       fetchQueue();
+
+      // Si se recibió un ID, generar la respuesta automáticamente
+      if (res.data && res.data.id) {
+        await api.post('/generate', { prompt: requestData.prompt_request, model: requestData.model, id: res.data.id });
+        fetchQueue(); // Refrescar la tabla para mostrar la respuesta
+      }
     } catch (err: any) {
       logger.error('Error submitting DB request', { error: err.message, status: err.response?.status });
       setError(`Error al enviar request: ${err.message}`);
@@ -260,9 +281,11 @@ const App: React.FC = () => {
   };
 
   const handleReadRow = async (item: PromptQueueItem) => {
+    // Si ya hay respuesta, no hacer nada
+    if (item.PROMPT_RESPONSE) return;
     setRowResponses(prev => ({ ...prev, [item.ID]: 'Cargando...' }));
     try {
-      const res = await api.post('/generate', { prompt: item.PROMPT_REQUEST, model: item.MODEL });
+      const res = await api.post('/generate', { prompt: item.PROMPT_REQUEST, model: item.MODEL, id: item.ID });
       let responseText = '';
       if (res.data && res.data.response) {
         responseText = typeof res.data.response === 'string' ? res.data.response : JSON.stringify(res.data.response);
