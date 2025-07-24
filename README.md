@@ -311,6 +311,41 @@ La columna PROMPT_RESPONSE es ahora de tipo CLOB para soportar respuestas largas
 
 Docker Compose permite gestionar los servicios de forma individual o conjunta. Aquí tienes ejemplos prácticos para cada contenedor:
 
+### Operaciones globales (todos los servicios)
+
+Puedes gestionar todos los servicios definidos en `docker-compose.yml` de forma global:
+
+#### Build global (todos los servicios)
+
+```sh
+# Build de todos los servicios
+docker compose build
+
+# Build de todos los servicios sin usar la cache
+docker compose build --no-cache
+```
+
+#### Levantar (up) todos los servicios
+
+```sh
+# Levantar todos los servicios en segundo plano
+docker compose up -d
+```
+
+#### Detener (down) todos los servicios
+
+```sh
+# Detener todos los servicios
+docker compose stop
+```
+
+#### Eliminar (down) todos los servicios y recursos
+
+```sh
+# Detener y eliminar todos los contenedores, redes y volúmenes definidos en docker-compose.yml
+docker compose down
+```
+
 ### Build de un contenedor específico
 
 ```sh
