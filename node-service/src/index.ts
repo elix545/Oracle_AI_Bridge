@@ -135,31 +135,45 @@ app.post('/api/generate', async (req, res) => {
 
   try {
     logger.info(`Llamando a Ollama con modelo: ${modelToUse}`);
+    
+    // Usar streaming para obtener la respuesta completa
     const response = await axios.post(
       `${OLLAMA_URL}/api/generate`,
-      { model: modelToUse, prompt },
+      { model: modelToUse, prompt, stream: false }, // stream: false para obtener respuesta completa
       { timeout: TIMEOUT_NODE_SERVICE }
     );
-    logger.info('Respuesta recibida de Ollama');
+    
+    logger.info('Respuesta recibida de Ollama', { 
+      hasResponse: !!response.data.response,
+      responseLength: response.data.response?.length,
+      responseType: typeof response.data.response
+    });
 
     // Si se recibe un ID, guardar la respuesta en la base de datos
-    if (id) {
+    if (id && response.data.response) {
       let conn;
       try {
+        const responseText = response.data.response;
         logger.info(`[PROMPT_RESPONSE][DEBUG] Intentando guardar en PROMPT_RESPONSE para ID ${id}:`, {
-          type: typeof response.data.response,
-          length: response.data.response?.length,
-          preview: typeof response.data.response === 'string' ? response.data.response.substring(0, 200) : JSON.stringify(response.data.response).substring(0, 200)
+          type: typeof responseText,
+          length: responseText.length,
+          preview: responseText.substring(0, 200)
         });
+        
         conn = await getOracleConnection();
         const updateResult = await conn.execute(
           `UPDATE middleware.PROMPT_QUEUE SET PROMPT_RESPONSE = :response, FECHA_RESPONSE = SYSDATE, FLAG_COMPLETADO = 1 WHERE ID = :id`,
-          { response: response.data.response || JSON.stringify(response.data), id }
+          { response: responseText, id }
         );
         await conn.commit();
         await conn.close();
-        logger.info(`[PROMPT_RESPONSE][DEBUG] Resultado de update para ID ${id}:`, { updateResult });
-        logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update`, { id, rowsAffected: updateResult.rowsAffected, updateResult });
+        
+        logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update`, { 
+          id, 
+          rowsAffected: updateResult.rowsAffected,
+          responseLength: responseText.length
+        });
+        
         if (!updateResult.rowsAffected) {
           logger.warn(`[PROMPT_RESPONSE][UPDATE] No se actualizó ninguna fila para ID`, { id });
         } else {
@@ -167,11 +181,23 @@ app.post('/api/generate', async (req, res) => {
         }
       } catch (dbErr: any) {
         if (conn) await conn.close();
-        logger.error(`[PROMPT_RESPONSE][UPDATE][ERROR] Error al actualizar PROMPT_RESPONSE en Oracle`, { id, error: dbErr.message, stack: dbErr.stack });
+        logger.error(`[PROMPT_RESPONSE][UPDATE][ERROR] Error al actualizar PROMPT_RESPONSE en Oracle`, { 
+          id, 
+          error: dbErr.message, 
+          stack: dbErr.stack 
+        });
       }
+    } else if (id) {
+      logger.warn(`[PROMPT_RESPONSE] No se recibió respuesta de Ollama para ID`, { id });
     }
 
-    res.json(response.data);
+    // Asegurar que solo se envíen datos serializables
+    const safeResponse = {
+      response: response.data.response || '',
+      model: response.data.model || modelToUse,
+      done: response.data.done || false
+    };
+    res.json(safeResponse);
   } catch (err: any) {
     logger.error('Error o timeout al generar respuesta con Ollama', err);
     res.status(500).json({ error: err.message });
@@ -186,9 +212,17 @@ app.get('/api/tags', async (req, res) => {
       data: response.data 
     });
     
-    // Asegurar que siempre devuelva un formato consistente
+    // Asegurar que siempre devuelva un formato consistente y serializable
     if (response.data && Array.isArray(response.data.models)) {
-      res.json(response.data);
+      // Filtrar solo los campos necesarios y asegurar que sean serializables
+      const safeModels = response.data.models.map((model: any) => ({
+        name: model.name || '',
+        model: model.model || '',
+        size: model.size || 0,
+        digest: model.digest || '',
+        modified_at: model.modified_at || ''
+      }));
+      res.json({ models: safeModels });
     } else {
       logger.warn('Ollama response format unexpected, returning empty models array', { data: response.data });
       res.json({ models: [] });

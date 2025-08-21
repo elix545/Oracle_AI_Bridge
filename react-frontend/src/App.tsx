@@ -31,6 +31,12 @@ class ErrorBoundary extends React.Component<
       stack: error.stack,
       componentStack: errorInfo.componentStack 
     });
+    
+    // Si es un error de serialización, intentar limpiar el estado
+    if (error.message.includes('Objects are not valid as a React child') || 
+        error.message.includes('serializable')) {
+      logger.warn('Serialization error detected, attempting to clean up state');
+    }
   }
 
   render() {
@@ -78,6 +84,32 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // Función para limpiar datos y asegurar que sean serializables
+  const sanitizeData = (data: any): any => {
+    if (data === null || data === undefined) {
+      return '';
+    }
+    if (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean') {
+      return String(data);
+    }
+    if (Array.isArray(data)) {
+      return data.map(sanitizeData);
+    }
+    if (typeof data === 'object') {
+      const sanitized: any = {};
+      for (const [key, value] of Object.entries(data)) {
+        try {
+          sanitized[key] = sanitizeData(value);
+        } catch (err) {
+          logger.warn('Error sanitizing object property', { key, error: err });
+          sanitized[key] = '';
+        }
+      }
+      return sanitized;
+    }
+    return String(data);
+  };
+
   logger.info('App component initialized');
 
   const fetchQueue = async () => {
@@ -90,7 +122,8 @@ const App: React.FC = () => {
         dataType: typeof res.data,
         data: res.data 
       });
-      // Corregir mapeo: si es array de arrays, mapear a objetos con claves
+      
+      // Asegurar que los datos sean serializables y válidos
       let rows: PromptQueueItem[] = [];
       if (Array.isArray(res.data)) {
         if (res.data.length > 0 && Array.isArray(res.data[0])) {
@@ -101,12 +134,14 @@ const App: React.FC = () => {
           ];
           rows = res.data.map((arr: any[]) => {
             const obj: any = {};
-            keys.forEach((k, i) => { obj[k] = arr[i]; });
+            keys.forEach((k, i) => { 
+              obj[k] = sanitizeData(arr[i]);
+            });
             return obj;
           });
         } else {
-          // Si ya es array de objetos
-          rows = res.data;
+          // Si ya es array de objetos, asegurar que sean serializables
+          rows = res.data.map((item: any) => sanitizeData(item));
         }
         setQueue(rows);
         setError(null);
@@ -133,9 +168,11 @@ const App: React.FC = () => {
         data: res.data 
       });
       
-      // Validar que res.data.models sea un array
+      // Validar que res.data.models sea un array y asegurar que sea serializable
       if (res.data && Array.isArray(res.data.models)) {
-        setModels(res.data.models);
+        // Asegurar que todos los modelos sean serializables
+        const safeModels = res.data.models.map((model: any) => sanitizeData(model));
+        setModels(safeModels);
         setError(null);
       } else {
         logger.error('Models response is not valid', { data: res.data });
@@ -217,8 +254,16 @@ const App: React.FC = () => {
 
       // Si se recibió un ID, generar la respuesta automáticamente
       if (res.data && res.data.id) {
-        await api.post('/generate', { prompt: requestData.prompt_request, model: requestData.model, id: res.data.id });
-        fetchQueue(); // Refrescar la tabla para mostrar la respuesta
+        logger.info('Auto-generating response for ID', { id: res.data.id, prompt: requestData.prompt_request, model: requestData.model });
+        try {
+          const generateRes = await api.post('/generate', { prompt: requestData.prompt_request, model: requestData.model, id: res.data.id });
+          logger.info('Auto-generate response received', { status: generateRes.status, response: generateRes.data });
+          fetchQueue(); // Refrescar la tabla para mostrar la respuesta
+        } catch (generateErr: any) {
+          logger.error('Error in auto-generate', { error: generateErr.message, status: generateErr.response?.status });
+        }
+      } else {
+        logger.warn('No ID received from request, skipping auto-generate');
       }
     } catch (err: any) {
       logger.error('Error submitting DB request', { error: err.message, status: err.response?.status });
@@ -238,14 +283,19 @@ const App: React.FC = () => {
       const res = await api.post('/generate', { prompt: ollamaPrompt });
       logger.info('Ollama response received', { status: res.status, responseLength: res.data?.response?.length });
       
-      // Asegurar que la respuesta sea siempre una cadena de texto
+      // Asegurar que la respuesta sea siempre una cadena de texto y sea serializable
       let responseText = '';
-      if (res.data && res.data.response) {
-        responseText = typeof res.data.response === 'string' ? res.data.response : JSON.stringify(res.data.response);
-      } else if (res.data) {
-        responseText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-      } else {
-        responseText = 'No se recibió respuesta';
+      try {
+        if (res.data && res.data.response) {
+          responseText = typeof res.data.response === 'string' ? res.data.response : String(res.data.response);
+        } else if (res.data) {
+          responseText = typeof res.data === 'string' ? res.data : String(res.data);
+        } else {
+          responseText = 'No se recibió respuesta';
+        }
+      } catch (serializeErr) {
+        logger.error('Error serializing response', { error: serializeErr, data: res.data });
+        responseText = 'Error al procesar la respuesta';
       }
       
       setOllamaResponse(responseText);
@@ -263,9 +313,11 @@ const App: React.FC = () => {
       const res = await api.get('/tags');
       logger.info('Ollama models response received', { status: res.status, models: res.data?.models, dataType: typeof res.data });
       
-      // Validar que res.data.models sea un array
+      // Validar que res.data.models sea un array y asegurar que sea serializable
       if (res.data && Array.isArray(res.data.models)) {
-        setOllamaModels(res.data.models);
+        // Asegurar que todos los modelos sean serializables
+        const safeModels = res.data.models.map((model: any) => sanitizeData(model));
+        setOllamaModels(safeModels);
         setShowOllamaModels(true);
         setError(null);
       } else {
@@ -287,12 +339,17 @@ const App: React.FC = () => {
     try {
       const res = await api.post('/generate', { prompt: item.PROMPT_REQUEST, model: item.MODEL, id: item.ID });
       let responseText = '';
-      if (res.data && res.data.response) {
-        responseText = typeof res.data.response === 'string' ? res.data.response : JSON.stringify(res.data.response);
-      } else if (res.data) {
-        responseText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-      } else {
-        responseText = 'No se recibió respuesta';
+      try {
+        if (res.data && res.data.response) {
+          responseText = typeof res.data.response === 'string' ? res.data.response : String(res.data.response);
+        } else if (res.data) {
+          responseText = typeof res.data === 'string' ? res.data : String(res.data);
+        } else {
+          responseText = 'No se recibió respuesta';
+        }
+      } catch (serializeErr) {
+        logger.error('Error serializing response in handleReadRow', { error: serializeErr, data: res.data });
+        responseText = 'Error al procesar la respuesta';
       }
       setRowResponses(prev => ({ ...prev, [item.ID]: responseText }));
     } catch (err: any) {
@@ -353,16 +410,11 @@ const App: React.FC = () => {
               Modelo:
               <select value={model} onChange={e => setModel(e.target.value)}>
                 <option value="">(Por defecto)</option>
-                {Array.isArray(models) && models.map((m: any, idx: number) => {
-                  const key = typeof m === 'string' ? m : m.model || m.name || idx;
-                  const value = typeof m === 'string' ? m : m.model || m.name || '';
-                  const label = typeof m === 'string' ? m : m.name || m.model || JSON.stringify(m);
-                  return (
-                    <option key={key} value={value}>
-                      {label}
-                    </option>
-                  );
-                })}
+                {Array.isArray(models) && models.map((m: any, idx: number) => (
+                  <option key={m || idx} value={m}>
+                    {m}
+                  </option>
+                ))}
               </select>
             </label>
             <button type="submit" disabled={loading}>
@@ -375,7 +427,7 @@ const App: React.FC = () => {
             <button type="submit" disabled={loading}>
               {loading ? 'Enviando...' : 'Enviar a Ollama'}
             </button>
-            <div><b>Respuesta:</b><br />{typeof ollamaResponse === 'string' ? ollamaResponse : JSON.stringify(ollamaResponse)}</div>
+            <div><b>Respuesta:</b><br />{String(ollamaResponse || '')}</div>
           </form>
         </div>
         <div style={{ margin: '24px 0' }}>
@@ -388,8 +440,8 @@ const App: React.FC = () => {
                   <li>No hay modelos instalados.</li>
                 ) : (
                   ollamaModels.map((m: any, idx: number) => (
-                    <li key={m.model || m.name || idx}>
-                      {typeof m === 'string' ? m : m.name || m.model || JSON.stringify(m)}
+                    <li key={m || idx}>
+                      {m}
                     </li>
                   ))
                 )}

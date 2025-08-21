@@ -24,4 +24,7 @@ coverage/
 *.swp
 *.swo
 *.tmp
-*.bak 
+*.bak
+
+# Ollama models (too large for Git)
+ollama/models/ 

@@ -24,6 +24,8 @@ services:
       OLLAMA_MODEL: llama3:8b
     ports:
       - '11435:11434'
+    volumes:
+      - ./ollama/models:/models
     deploy:
       resources:
         limits:

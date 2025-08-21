@@ -1,4 +1,3 @@
-
 Formas de conetarce a la base de datos vía un contenedor efimero
 
 0. Hacer docker login
@@ -49,3 +48,14 @@ Formas de conetarce a la base de datos vía un contenedor efimero
    ```sh
    sqlplus middleware/oracle@XE
    ```
+
+# Consultas de ejemplo para las tablas principales
+
+-- Consultar todos los registros de la tabla PROMPT_QUEUE
+```sql
+SET LINESIZE 1000
+SET PAGESIZE 0
+SELECT * FROM middleware.PROMPT_QUEUE;
+```
+
+-- (Agrega aquí más consultas si se crean nuevas tablas en el futuro)

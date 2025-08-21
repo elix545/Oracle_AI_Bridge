@@ -60,6 +60,7 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
    ```sh
    docker compose up --build -d
    ```
+   > **Nota**: La primera vez, Ollama descargará el modelo llama3:8b (~4.7 GB). Los siguientes reinicios serán instantáneos gracias al volumen persistente.
 
 2. **Accede al frontend:**
    - [http://localhost:5173](http://localhost:5173)
@@ -68,6 +69,15 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
    - Envía un prompt a la base de datos (sección "New Request using DB").
    - Envía un prompt directo a Ollama (sección "New Request using Ollama service").
    - Visualiza la cola de prompts y respuestas.
+
+4. **Reinicios rápidos para desarrollo:**
+   ```sh
+   # Reiniciar solo Ollama (modelos ya descargados)
+   docker-compose restart ollama
+   
+   # Reiniciar solo el backend
+   docker-compose restart node-service
+   ```
 
 ---
 
@@ -173,10 +183,13 @@ curl -X POST http://localhost:3001/api/generate \
    cd node-service && npm install
    cd ../react-frontend && npm install
    ```
+
 2. Levanta Oracle y Ollama con Docker Compose:
    ```sh
    docker compose up oracle-xe ollama
    ```
+   > **Optimización**: Una vez descargado el modelo, los reinicios de Ollama serán instantáneos.
+
 3. Inicia el backend Node.js en modo desarrollo:
    ```sh
    cd node-service
@@ -184,12 +197,26 @@ curl -X POST http://localhost:3001/api/generate \
    # O con nodemon para hot reload (instala nodemon si lo deseas)
    # npx nodemon src/index.ts
    ```
+
 4. Inicia el frontend React en modo desarrollo:
    ```sh
    cd react-frontend
    npm run dev
    ```
+
 5. Accede a [http://localhost:5173](http://localhost:5173)
+
+### Flujo de Desarrollo Optimizado
+```sh
+# Desarrollo iterativo rápido
+docker-compose restart node-service    # Reiniciar backend
+docker-compose restart react-frontend  # Reiniciar frontend
+docker-compose restart ollama          # Reiniciar Ollama (instantáneo)
+
+# Ver logs en tiempo real
+docker-compose logs -f node-service
+docker-compose logs -f ollama
+```
 
 ---
 
@@ -211,7 +238,9 @@ curl -X POST http://localhost:3001/api/generate \
 - Modelo: llama3:8b (CPU, 8GB RAM mínimo, 4 núcleos)
 - Puerto host: 11435
 - Puerto contenedor: 11434
-- El modelo llama3:8b se descarga automáticamente al iniciar el contenedor, no es necesario hacerlo manualmente.
+- **Volumen persistente**: Los modelos se almacenan en `./ollama/models` del host, montado en `/models` del contenedor
+- **Optimización de desarrollo**: Los modelos solo se descargan una vez, acelerando reinicios y despliegues
+- El modelo llama3:8b se descarga automáticamente al iniciar el contenedor por primera vez
 
 ### React + Vite
 - Interfaz web para pruebas y monitoreo.
@@ -303,9 +332,65 @@ docker-compose logs node-service
 docker-compose logs ollama
 ```
 
+### Verificar el Volumen de Ollama
+```bash
+# Verificar que el volumen esté montado correctamente
+docker inspect ollama --format='{{.Mounts}}'
+
+# Verificar contenido del directorio de modelos
+docker exec ollama ls -la /models/
+
+# Verificar modelos disponibles
+curl http://localhost:11435/api/tags
+```
+
+### Problemas Comunes del Volumen
+- **Modelos no persisten**: Verifica que la carpeta `./ollama/models` tenga permisos de escritura
+- **Volumen no se monta**: Asegúrate de que la ruta en `docker-compose.yml` sea correcta
+- **Modelos se redescargan**: Verifica que el volumen esté montado en `/models` (no en `/root/.ollama/models`)
+
 ### Notas sobre CLOB
 
 La columna PROMPT_RESPONSE es ahora de tipo CLOB para soportar respuestas largas de IA. El backend Node.js está configurado para leer y escribir CLOBs automáticamente usando la opción fetchAsString de node-oracledb.
+
+## Optimización del Volumen de Ollama para Desarrollo
+
+### Configuración del Volumen
+El servicio Ollama está configurado con un volumen persistente que optimiza significativamente el desarrollo:
+
+```yaml
+volumes:
+  - ./ollama/models:/models
+```
+
+### Beneficios para el Desarrollo
+- **Persistencia de modelos**: Los modelos descargados se mantienen entre reinicios del contenedor
+- **Aceleración de despliegues**: No es necesario redescargar modelos en cada `docker-compose up`
+- **Ahorro de tiempo**: Reduce el tiempo de espera de ~5-10 minutos a segundos
+- **Ahorro de ancho de banda**: Los modelos solo se descargan una vez desde internet
+
+### Estructura de Carpetas del Volumen
+```
+ollama/
+├── models/           # Carpeta montada en el contenedor
+│   ├── blobs/       # Archivos binarios de los modelos
+│   └── manifests/   # Metadatos de los modelos
+└── Dockerfile
+```
+
+### Comandos de Desarrollo Optimizados
+```sh
+# Reiniciar solo Ollama (modelos ya descargados)
+docker-compose restart ollama
+
+# Reconstruir y reiniciar Ollama (mantiene modelos)
+docker-compose up -d --build ollama
+
+# Verificar estado del volumen
+docker exec ollama ls -la /models/
+```
+
+---
 
 ## Uso de Docker Compose: build, up y down de contenedores específicos
 
