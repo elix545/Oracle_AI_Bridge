@@ -11,6 +11,14 @@ interface PromptQueueItem {
   [key: string]: any; // Para permitir campos adicionales
 }
 
+interface OllamaModel {
+  name: string;
+  model: string;
+  size: number;
+  digest: string;
+  modified_at: string;
+}
+
 // Error Boundary para capturar errores de React
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -71,6 +79,8 @@ class ErrorBoundary extends React.Component<
 }
 
 const App: React.FC = () => {
+  console.log('App component rendering...');
+  
   const [dbRequest, setDbRequest] = useState({ usuario: '', modulo: '', transicion: '', prompt_request: '' });
   const [ollamaPrompt, setOllamaPrompt] = useState('');
   const [ollamaResponse, setOllamaResponse] = useState('');
@@ -79,35 +89,70 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [model, setModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [showOllamaModels, setShowOllamaModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Función para limpiar datos y asegurar que sean serializables
-  const sanitizeData = (data: any): any => {
+  function sanitizeData(data: any): any {
     if (data === null || data === undefined) {
       return '';
     }
-    if (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean') {
+    
+    if (typeof data === 'string') {
+      return data;
+    }
+    
+    if (typeof data === 'number' || typeof data === 'boolean') {
       return String(data);
     }
-    if (Array.isArray(data)) {
-      return data.map(sanitizeData);
-    }
+    
     if (typeof data === 'object') {
-      const sanitized: any = {};
-      for (const [key, value] of Object.entries(data)) {
-        try {
-          sanitized[key] = sanitizeData(value);
-        } catch (err) {
-          logger.warn('Error sanitizing object property', { key, error: err });
-          sanitized[key] = '';
-        }
+      // Check if it's an Oracle CLOB object
+      if (data._readableState || data._impl || data._type || data._events) {
+        logger.warn('Detected Oracle LOB or non-serializable object, converting to string', {
+          objectKeys: Object.keys(data),
+          objectType: typeof data
+        });
+        return '[LOB Object]';
       }
-      return sanitized;
+      
+      // Check if it's an array
+      if (Array.isArray(data)) {
+        return data.map(item => sanitizeData(item));
+      }
+      
+      // For other objects, try to convert to string
+      try {
+        return String(data);
+      } catch (err) {
+        logger.warn('Error converting object to string', { error: err, data });
+        return '[Object]';
+      }
     }
+    
     return String(data);
+  }
+
+  // Función para extraer el nombre del modelo de un objeto modelo
+  const getModelName = (model: any): string => {
+    if (typeof model === 'string') {
+      return model;
+    }
+    if (typeof model === 'object' && model !== null) {
+      // Si es un objeto modelo de Ollama, usar la propiedad name
+      if (model.name) {
+        return String(model.name);
+      }
+      // Si tiene otras propiedades, intentar encontrar un nombre
+      if (model.model) {
+        return String(model.model);
+      }
+      // Si no tiene propiedades conocidas, convertir a string
+      return String(model);
+    }
+    return String(model || '');
   };
 
   logger.info('App component initialized');
@@ -158,10 +203,12 @@ const App: React.FC = () => {
   };
 
   const fetchModels = async () => {
+    logger.info('=== fetchModels function called ===');
     logger.info('Fetching models from /api/tags');
     try {
+      logger.info('Making API call to /api/tags...');
       const res = await api.get('/tags');
-      logger.info('Models response received', { 
+      logger.info('API call to /api/tags completed', { 
         status: res.status, 
         models: res.data?.models, 
         dataType: typeof res.data,
@@ -170,37 +217,64 @@ const App: React.FC = () => {
       
       // Validar que res.data.models sea un array y asegurar que sea serializable
       if (res.data && Array.isArray(res.data.models)) {
-        // Asegurar que todos los modelos sean serializables
-        const safeModels = res.data.models.map((model: any) => sanitizeData(model));
-        setModels(safeModels);
+        logger.info('Models array found, processing...');
+        // Extraer solo los nombres de los modelos para el selector
+        const modelNames = res.data.models.map((model: any) => {
+          const modelName = getModelName(model);
+          logger.debug('Processing model', { original: model, extractedName: modelName, type: typeof modelName });
+          return modelName;
+        });
+        
+        logger.info('Processed model names', { modelNames, count: modelNames.length });
+        setModels(modelNames);
         setError(null);
+        logger.info('=== fetchModels completed successfully ===');
       } else {
         logger.error('Models response is not valid', { data: res.data });
         setModels([]);
         setError('Error: La respuesta de modelos no es válida');
       }
     } catch (err: any) {
-      logger.error('Error fetching models', { error: err.message, status: err.response?.status });
+      logger.error('Error fetching models', { error: err.message, status: err.response?.status, stack: err.stack });
       setModels([]);
       setError(`Error al obtener modelos: ${err.message}`);
     }
   };
 
   useEffect(() => {
-    logger.info('App useEffect triggered - initializing component');
+    console.log('App useEffect triggered - initializing component');
+    logger.info('=== App useEffect triggered - initializing component ===');
     
     const initializeApp = async () => {
       try {
-        // Fetch initial data
-        await Promise.all([fetchQueue(), fetchModels()]);
+        console.log('Starting app initialization...');
+        logger.info('=== Starting app initialization... ===');
+        
+        // Fetch initial data - call them separately to see which one fails
+        console.log('Calling fetchQueue...');
+        logger.info('=== Calling fetchQueue... ===');
+        await fetchQueue();
+        console.log('fetchQueue completed');
+        logger.info('=== fetchQueue completed ===');
+        
+        console.log('About to call fetchModels...');
+        logger.info('=== About to call fetchModels... ===');
+        await fetchModels();
+        console.log('fetchModels call completed');
+        logger.info('=== fetchModels call completed ===');
+        
         setIsInitialized(true);
-        logger.info('App initialization completed successfully');
+        console.log('App initialization completed successfully');
+        logger.info('=== App initialization completed successfully ===');
       } catch (err: any) {
-        logger.error('Error during app initialization', { error: err.message });
+        console.error('Error during app initialization:', err);
+        logger.error('=== Error during app initialization ===', { error: err.message, stack: err.stack });
         setError(`Error durante la inicialización: ${err.message}`);
       }
     };
     
+    console.log('Calling initializeApp...');
+    logger.info('=== Calling initializeApp... ===');
     initializeApp();
     
     // Set up polling interval
@@ -231,6 +305,27 @@ const App: React.FC = () => {
       });
     }
   }, [queue]);
+
+  // Ensure models state is always an array of strings
+  useEffect(() => {
+    if (Array.isArray(models)) {
+      const sanitizedModels = models.map((model: any) => {
+        if (typeof model === 'string') {
+          return model;
+        }
+        if (typeof model === 'object' && model !== null) {
+          return model.name || model.model || String(model);
+        }
+        return String(model || '');
+      });
+      
+      // Only update if there's a difference
+      if (JSON.stringify(sanitizedModels) !== JSON.stringify(models)) {
+        logger.warn('Sanitizing models state', { original: models, sanitized: sanitizedModels });
+        setModels(sanitizedModels);
+      }
+    }
+  }, [models]);
 
   const handleDbRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,8 +410,14 @@ const App: React.FC = () => {
       
       // Validar que res.data.models sea un array y asegurar que sea serializable
       if (res.data && Array.isArray(res.data.models)) {
-        // Asegurar que todos los modelos sean serializables
-        const safeModels = res.data.models.map((model: any) => sanitizeData(model));
+        // Asegurar que todos los modelos sean serializables y tengan la estructura correcta
+        const safeModels = res.data.models.map((model: any) => ({
+          name: getModelName(model),
+          model: typeof model === 'object' && model.model ? String(model.model) : getModelName(model),
+          size: typeof model === 'object' && model.size ? Number(model.size) || 0 : 0,
+          digest: typeof model === 'object' && model.digest ? String(model.digest) : '',
+          modified_at: typeof model === 'object' && model.modified_at ? String(model.modified_at) : ''
+        }));
         setOllamaModels(safeModels);
         setShowOllamaModels(true);
         setError(null);
@@ -408,13 +509,35 @@ const App: React.FC = () => {
             <textarea placeholder="Prompt Request" value={dbRequest.prompt_request} onChange={e => setDbRequest({ ...dbRequest, prompt_request: e.target.value })} required />
             <label>
               Modelo:
-              <select value={model} onChange={e => setModel(e.target.value)}>
+              <select 
+                value={model} 
+                onChange={e => setModel(e.target.value)}
+                onClick={async () => {
+                  if (models.length === 0) {
+                    logger.info('Model selector clicked, fetching models...');
+                    await fetchModels();
+                  }
+                }}
+              >
                 <option value="">(Por defecto)</option>
-                {Array.isArray(models) && models.map((m: any, idx: number) => (
-                  <option key={m || idx} value={m}>
-                    {m}
-                  </option>
-                ))}
+                {Array.isArray(models) && models.map((modelName: any, idx: number) => {
+                  // Ensure we never render objects
+                  const displayName = typeof modelName === 'string' ? modelName : 
+                                    typeof modelName === 'object' && modelName !== null ? 
+                                    (modelName.name || modelName.model || String(modelName)) : 
+                                    String(modelName || '');
+                  
+                  const value = typeof modelName === 'string' ? modelName : 
+                               typeof modelName === 'object' && modelName !== null ? 
+                               (modelName.name || modelName.model || '') : 
+                               String(modelName || '');
+                  
+                  return (
+                    <option key={displayName || idx} value={value}>
+                      {displayName}
+                    </option>
+                  );
+                })}
               </select>
             </label>
             <button type="submit" disabled={loading}>
@@ -432,6 +555,7 @@ const App: React.FC = () => {
         </div>
         <div style={{ margin: '24px 0' }}>
           <button onClick={handleFetchOllamaModels}>Ver modelos instalados en Ollama</button>
+          <button onClick={fetchModels} style={{ marginLeft: '10px' }}>Test fetchModels</button>
           {showOllamaModels && (
             <div>
               <h3>Modelos instalados en Ollama:</h3>
@@ -439,9 +563,11 @@ const App: React.FC = () => {
                 {!Array.isArray(ollamaModels) || ollamaModels.length === 0 ? (
                   <li>No hay modelos instalados.</li>
                 ) : (
-                  ollamaModels.map((m: any, idx: number) => (
-                    <li key={m || idx}>
-                      {m}
+                  ollamaModels.map((model: OllamaModel, idx: number) => (
+                    <li key={model.name || idx}>
+                      <strong>{model.name}</strong>
+                      {model.size > 0 && ` (${Math.round(model.size / 1024 / 1024 / 1024 * 100) / 100} GB)`}
+                      {model.modified_at && ` - Última modificación: ${model.modified_at}`}
                     </li>
                   ))
                 )}
@@ -467,13 +593,24 @@ const App: React.FC = () => {
             {Array.isArray(queue) && queue.length > 0 ? (
               queue.map((item, idx) => (
                 <tr key={item.ID ?? idx}>
-                  <td>{item.ID}</td>
-                  <td>{item.USUARIO}</td>
-                  <td>{item.MODULO}</td>
-                  <td>{item.TRANSICION}</td>
+                  <td>{String(item.ID || '')}</td>
+                  <td>{String(item.USUARIO || '')}</td>
+                  <td>{String(item.MODULO || '')}</td>
+                  <td>{String(item.TRANSICION || '')}</td>
                   <td>{item.FLAG_COMPLETADO === 1 ? 'Completado' : 'Pendiente'}</td>
-                  <td>{item.PROMPT_REQUEST}</td>
-                  <td>{rowResponses[item.ID] !== undefined ? rowResponses[item.ID] : item.PROMPT_RESPONSE}</td>
+                  <td>{String(item.PROMPT_REQUEST || '')}</td>
+                  <td>{(() => {
+                    const response = rowResponses[item.ID] !== undefined ? rowResponses[item.ID] : (item.PROMPT_RESPONSE || '');
+                    // Handle any remaining [LOB Object] strings or CLOB objects
+                    if (response === '[LOB Object]' || response === '[Error converting CLOB]') {
+                      return 'Respuesta disponible (CLOB)';
+                    }
+                    // Check if it's a CLOB object
+                    if (response && typeof response === 'object' && (response as any)._length) {
+                      return `Respuesta disponible (${(response as any)._length} caracteres)`;
+                    }
+                    return String(response);
+                  })()}</td>
                   <td>
                     <button onClick={() => handleReadRow(item)}>
                       Leer

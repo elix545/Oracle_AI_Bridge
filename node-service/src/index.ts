@@ -47,6 +47,42 @@ async function getOracleConnection() {
   });
 }
 
+// Función para sanitizar datos y asegurar que sean serializables
+function sanitizeData(data: any): any {
+  if (data === null || data === undefined) {
+    return '';
+  }
+  if (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean') {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map(sanitizeData);
+  }
+  if (typeof data === 'object') {
+    // Check for Oracle LOB objects or other non-serializable objects
+    if (data._readableState || data._writableState || data._events || data._impl || 
+        data._chunkSize || data._pieceSize || data._length || data._type || data._autoCloseLob) {
+      logger.warn('Detected Oracle LOB or non-serializable object, converting to string', { 
+        objectKeys: Object.keys(data),
+        objectType: data.constructor?.name 
+      });
+      return '[LOB Object]';
+    }
+    
+    const sanitized: any = {};
+    for (const [key, value] of Object.entries(data)) {
+      try {
+        sanitized[key] = sanitizeData(value);
+      } catch (err) {
+        logger.warn('Error sanitizing object property', { key, error: err });
+        sanitized[key] = '';
+      }
+    }
+    return sanitized;
+  }
+  return String(data);
+}
+
 app.post('/api/request', async (req, res) => {
   const { usuario, modulo, transicion, prompt_request, model } = req.body;
   let conn;
@@ -78,24 +114,40 @@ app.post('/api/request', async (req, res) => {
 app.get('/api/requests', async (req, res) => {
   let conn;
   try {
+    logger.info('Starting /api/requests endpoint');
     conn = await getOracleConnection();
+    logger.info('Oracle connection established');
+    
     const result = await conn.execute(
-      `SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, PROMPT_RESPONSE, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
+      `SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, 
+              DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE,
+              FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
        FROM middleware.PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`,
       [],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchAsString: [oracledb.CLOB] }
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    await conn.close();
     
-    // Validar que result.rows sea un array
+    logger.info('Oracle query executed', { 
+      hasRows: !!result.rows, 
+      rowCount: result.rows ? result.rows.length : 0,
+      firstRowKeys: result.rows && result.rows.length > 0 ? Object.keys(result.rows[0]) : []
+    });
+    
+    // Validar que result.rows sea un array y sanitizar los datos
     if (result.rows && Array.isArray(result.rows)) {
-      const rows = result.rows.map((row: any) => ({
-        ...row,
-        MODEL: row.MODEL || OLLAMA_DEFAULT_MODEL,
-      }));
+      const rows = result.rows.map((row: any) => {
+        const sanitizedRow = sanitizeData(row);
+        return {
+          ...sanitizedRow,
+          MODEL: sanitizedRow.MODEL || OLLAMA_DEFAULT_MODEL,
+        };
+      });
+      
+      await conn.close();
       logger.info('Sending queue data', { rowCount: rows.length });
       res.json(rows);
     } else {
+      await conn.close();
       logger.error('Oracle result.rows is not an array', { result });
       res.json([]);
     }
@@ -117,14 +169,16 @@ app.post('/api/generate', async (req, res) => {
     try {
       conn = await getOracleConnection();
       const result = await conn.execute(
-        `SELECT PROMPT_RESPONSE FROM middleware.PROMPT_QUEUE WHERE ID = :id`,
+        `SELECT DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE 
+         FROM middleware.PROMPT_QUEUE WHERE ID = :id`,
         { id },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchAsString: [oracledb.CLOB] }
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       await conn.close();
       if (result.rows && result.rows.length > 0 && result.rows[0].PROMPT_RESPONSE) {
         logger.info(`[PROMPT_RESPONSE][CACHE] PROMPT_RESPONSE ya existe para ID`, { id });
-        return res.json({ response: result.rows[0].PROMPT_RESPONSE });
+        const sanitizedResponse = sanitizeData(result.rows[0].PROMPT_RESPONSE);
+        return res.json({ response: sanitizedResponse });
       }
     } catch (err: any) {
       if (conn) await conn.close();
@@ -153,7 +207,7 @@ app.post('/api/generate', async (req, res) => {
     if (id && response.data.response) {
       let conn;
       try {
-        const responseText = response.data.response;
+        const responseText = sanitizeData(response.data.response);
         logger.info(`[PROMPT_RESPONSE][DEBUG] Intentando guardar en PROMPT_RESPONSE para ID ${id}:`, {
           type: typeof responseText,
           length: responseText.length,
@@ -193,9 +247,9 @@ app.post('/api/generate', async (req, res) => {
 
     // Asegurar que solo se envíen datos serializables
     const safeResponse = {
-      response: response.data.response || '',
-      model: response.data.model || modelToUse,
-      done: response.data.done || false
+      response: sanitizeData(response.data.response || ''),
+      model: sanitizeData(response.data.model || modelToUse),
+      done: sanitizeData(response.data.done || false)
     };
     res.json(safeResponse);
   } catch (err: any) {
@@ -215,13 +269,16 @@ app.get('/api/tags', async (req, res) => {
     // Asegurar que siempre devuelva un formato consistente y serializable
     if (response.data && Array.isArray(response.data.models)) {
       // Filtrar solo los campos necesarios y asegurar que sean serializables
-      const safeModels = response.data.models.map((model: any) => ({
-        name: model.name || '',
-        model: model.model || '',
-        size: model.size || 0,
-        digest: model.digest || '',
-        modified_at: model.modified_at || ''
-      }));
+      const safeModels = response.data.models.map((model: any) => {
+        const sanitizedModel = sanitizeData(model);
+        return {
+          name: sanitizedModel.name || '',
+          model: sanitizedModel.model || '',
+          size: sanitizedModel.size || 0,
+          digest: sanitizedModel.digest || '',
+          modified_at: sanitizedModel.modified_at || ''
+        };
+      });
       res.json({ models: safeModels });
     } else {
       logger.warn('Ollama response format unexpected, returning empty models array', { data: response.data });
