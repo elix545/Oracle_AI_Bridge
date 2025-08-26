@@ -145,10 +145,28 @@ app.get('/api/requests', async (req, res) => {
       
       await conn.close();
       logger.info('Sending queue data', { rowCount: rows.length });
+      
+      // Set headers to prevent caching
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'ETag': `"${Date.now()}"`
+      });
+      
       res.json(rows);
     } else {
       await conn.close();
       logger.error('Oracle result.rows is not an array', { result });
+      
+      // Set headers to prevent caching
+      res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'ETag': `"${Date.now()}"`
+      });
+      
       res.json([]);
     }
   } catch (err: any) {
