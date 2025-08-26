@@ -16,6 +16,39 @@ oracledb.initOracleClient();
 const app = express();
 app.use(express.json());
 
+// Middleware para manejar errores de parsing de JSON
+app.use((err: any, req: any, res: any, next: any) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    logger.error('JSON parsing error', { 
+      error: err.message, 
+      url: req.url, 
+      method: req.method,
+      body: req.body,
+      headers: req.headers
+    });
+    
+    // Limpiar el body problemático y continuar
+    req.body = {};
+    return next();
+  }
+  next();
+});
+
+// Middleware para sanitizar todos los requests
+app.use((req: any, res: any, next: any) => {
+  try {
+    // Sanitizar el body del request
+    if (req.body && typeof req.body === 'object') {
+      req.body = sanitizeData(req.body);
+    }
+    next();
+  } catch (err) {
+    logger.error('Error sanitizing request body', { error: err, url: req.url });
+    req.body = {};
+    next();
+  }
+});
+
 // Middleware para loguear todas las peticiones entrantes
 app.use((req, res, next) => {
   logger.info(`Request: ${req.method} ${req.originalUrl}`, { body: req.body });
@@ -52,12 +85,37 @@ function sanitizeData(data: any): any {
   if (data === null || data === undefined) {
     return '';
   }
-  if (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean') {
+  
+  if (typeof data === 'string') {
+    // Limpiar caracteres especiales y control que pueden causar problemas
+    let cleanedString = data
+      .replace(/\t/g, ' ')           // Reemplazar tabs con espacios
+      .replace(/\r/g, ' ')           // Reemplazar carriage returns
+      .replace(/\n/g, ' ')           // Reemplazar newlines con espacios
+      .replace(/\f/g, ' ')           // Reemplazar form feeds
+      .replace(/\v/g, ' ')           // Reemplazar vertical tabs
+      .replace(/\0/g, '')            // Remover null bytes
+      .replace(/[\x00-\x1F\x7F]/g, ' ') // Remover otros caracteres de control
+      .replace(/\s+/g, ' ')          // Normalizar espacios múltiples
+      .trim();                       // Remover espacios al inicio y final
+    
+    // Si después de la limpieza queda vacío, devolver un valor por defecto
+    return cleanedString || '[Texto vacío]';
+  }
+  
+  if (typeof data === 'number' || typeof data === 'boolean') {
     return data;
   }
+  
   if (Array.isArray(data)) {
-    return data.map(sanitizeData);
+    try {
+      return data.map(item => sanitizeData(item));
+    } catch (err) {
+      logger.warn('Error sanitizing array item', { error: err, data });
+      return [];
+    }
   }
+  
   if (typeof data === 'object') {
     // Check for Oracle LOB objects or other non-serializable objects
     if (data._readableState || data._writableState || data._events || data._impl || 
@@ -69,18 +127,53 @@ function sanitizeData(data: any): any {
       return '[LOB Object]';
     }
     
+    // Para otros objetos, intentar sanitizar cada propiedad
     const sanitized: any = {};
-    for (const [key, value] of Object.entries(data)) {
-      try {
-        sanitized[key] = sanitizeData(value);
-      } catch (err) {
-        logger.warn('Error sanitizing object property', { key, error: err });
-        sanitized[key] = '';
+    try {
+      for (const [key, value] of Object.entries(data)) {
+        try {
+          // Sanitizar la clave también para evitar problemas
+          const safeKey = typeof key === 'string' ? key.replace(/[^\w]/g, '_') : String(key);
+          sanitized[safeKey] = sanitizeData(value);
+        } catch (err) {
+          logger.warn('Error sanitizing object property', { key, error: err });
+          sanitized[key] = '';
+        }
       }
+      return sanitized;
+    } catch (err) {
+      logger.warn('Error sanitizing object', { error: err, data });
+      return '[Object Error]';
     }
-    return sanitized;
   }
-  return String(data);
+  
+  // Para cualquier otro tipo, intentar convertir a string de forma segura
+  try {
+    const stringValue = String(data);
+    // Aplicar la misma limpieza que a los strings
+    return sanitizeData(stringValue);
+  } catch (err) {
+    logger.warn('Error converting data to string', { error: err, data });
+    return '[Conversion Error]';
+  }
+}
+
+// Función para limpiar prompts específicamente
+function cleanPrompt(prompt: string): string {
+  if (typeof prompt !== 'string') {
+    return String(prompt || '');
+  }
+  
+  return prompt
+    .replace(/\t/g, ' ')           // Reemplazar tabs
+    .replace(/\r/g, ' ')           // Reemplazar carriage returns
+    .replace(/\n/g, ' ')           // Reemplazar newlines
+    .replace(/\f/g, ' ')           // Reemplazar form feeds
+    .replace(/\v/g, ' ')           // Reemplazar vertical tabs
+    .replace(/\0/g, '')            // Remover null bytes
+    .replace(/[\x00-\x1F\x7F]/g, ' ') // Remover otros caracteres de control
+    .replace(/\s+/g, ' ')          // Normalizar espacios múltiples
+    .trim();                       // Remover espacios al inicio y final
 }
 
 app.post('/api/request', async (req, res) => {
@@ -178,7 +271,17 @@ app.get('/api/requests', async (req, res) => {
 
 app.post('/api/generate', async (req, res) => {
   const { prompt, model, id } = req.body;
-  logger.info(`[PROMPT_RESPONSE] Valor recibido de id en /api/generate:`, { id });
+  
+  // Limpiar el prompt antes de procesarlo para evitar caracteres problemáticos
+  const cleanedPrompt = cleanPrompt(prompt);
+  
+  logger.info(`[PROMPT_RESPONSE] Valor recibido de id en /api/generate:`, { 
+    id, 
+    originalPrompt: prompt,
+    cleanedPrompt: cleanedPrompt,
+    promptLength: cleanedPrompt.length
+  });
+  
   const modelToUse = model || OLLAMA_DEFAULT_MODEL;
 
   // Si se recibe un ID, primero consultar si ya existe PROMPT_RESPONSE
@@ -211,7 +314,7 @@ app.post('/api/generate', async (req, res) => {
     // Usar streaming para obtener la respuesta completa
     const response = await axios.post(
       `${OLLAMA_URL}/api/generate`,
-      { model: modelToUse, prompt, stream: false }, // stream: false para obtener respuesta completa
+      { model: modelToUse, prompt: cleanedPrompt, stream: false }, // Usar prompt limpio
       { timeout: TIMEOUT_NODE_SERVICE }
     );
     
