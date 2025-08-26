@@ -160,13 +160,31 @@ const App: React.FC = () => {
   const fetchQueue = async () => {
     logger.info('Fetching queue from /api/requests');
     try {
-      const res = await api.get('/requests');
+      // Add cache-busting parameter to prevent browser caching
+      const timestamp = Date.now();
+      const res = await api.get(`/requests?t=${timestamp}`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'If-Modified-Since': '0'
+        }
+      });
       logger.info('Queue response received', { 
         status: res.status, 
         dataLength: res.data?.length, 
         dataType: typeof res.data,
         data: res.data 
       });
+      
+      // Log specific items to debug
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        logger.info('First few items in queue:', res.data.slice(0, 3).map(item => ({
+          ID: item.ID,
+          PROMPT_REQUEST: item.PROMPT_REQUEST,
+          PROMPT_RESPONSE: item.PROMPT_RESPONSE,
+          FLAG_COMPLETADO: item.FLAG_COMPLETADO
+        })));
+      }
       
       // Asegurar que los datos sean serializables y válidos
       let rows: PromptQueueItem[] = [];
@@ -277,11 +295,31 @@ const App: React.FC = () => {
     logger.info('=== Calling initializeApp... ===');
     initializeApp();
     
-    // Set up polling interval
+    // Set up polling interval with adaptive timing
     const interval = setInterval(() => {
       logger.debug('Polling queue - interval triggered');
-      fetchQueue();
-    }, 5000);
+      
+      // Check if there are pending requests and adjust polling frequency
+      const hasPendingRequests = queue.some(item => item.FLAG_COMPLETADO === 0);
+      
+      if (hasPendingRequests) {
+        logger.debug('Pending requests detected, polling more frequently');
+        fetchQueue();
+        
+        // Also check for new responses in pending requests
+        queue.forEach(item => {
+          if (item.FLAG_COMPLETADO === 0 && item.PROMPT_RESPONSE) {
+            logger.info('Found pending request with response, updating rowResponses', { 
+              id: item.ID, 
+              response: item.PROMPT_RESPONSE 
+            });
+            setRowResponses(prev => ({ ...prev, [item.ID]: item.PROMPT_RESPONSE }));
+          }
+        });
+      } else {
+        fetchQueue();
+      }
+    }, 2000); // Reduced to 2 seconds for better responsiveness
     
     logger.info('Polling interval set up for queue updates');
     
@@ -289,18 +327,32 @@ const App: React.FC = () => {
       logger.info('Cleaning up interval');
       clearInterval(interval);
     };
-  }, []);
+  }, [queue]); // Added queue as dependency to react to changes
 
   // Mostrar automáticamente los responses ya procesados en la tabla
   useEffect(() => {
+    console.log('useEffect triggered - queue changed', { queueLength: queue.length });
+    logger.info('useEffect triggered - queue changed', { queueLength: queue.length });
+    
     if (Array.isArray(queue) && queue.length > 0) {
+      logger.info('Auto-updating rowResponses from queue', { 
+        queueLength: queue.length, 
+        itemsWithResponses: queue.filter(item => item.PROMPT_RESPONSE).map(item => ({ ID: item.ID, response: item.PROMPT_RESPONSE }))
+      });
+      
       setRowResponses(prev => {
         const updated: { [id: number]: string } = { ...prev };
+        let changes = 0;
         queue.forEach(item => {
           if (item.PROMPT_RESPONSE && !updated[item.ID]) {
             updated[item.ID] = item.PROMPT_RESPONSE;
+            changes++;
+            logger.info('Auto-added response for ID', { id: item.ID, response: item.PROMPT_RESPONSE });
           }
         });
+        if (changes > 0) {
+          logger.info('Updated rowResponses', { changes, newKeys: Object.keys(updated) });
+        }
         return updated;
       });
     }
@@ -341,24 +393,77 @@ const App: React.FC = () => {
       logger.info('Sending POST to /api/request', requestData);
       
       const res = await api.post('/request', requestData);
-      logger.info('DB request submitted successfully');
+      logger.info('DB request submitted successfully', { response: res.data });
       
       setDbRequest({ usuario: '', modulo: '', transicion: '', prompt_request: '' });
       setModel('');
-      fetchQueue();
-
+      
       // Si se recibió un ID, generar la respuesta automáticamente
       if (res.data && res.data.id) {
-        logger.info('Auto-generating response for ID', { id: res.data.id, prompt: requestData.prompt_request, model: requestData.model });
+        const requestId = res.data.id;
+        logger.info('Auto-generating response for ID', { id: requestId, prompt: requestData.prompt_request, model: requestData.model });
+        
         try {
-          const generateRes = await api.post('/generate', { prompt: requestData.prompt_request, model: requestData.model, id: res.data.id });
+          // Generar la respuesta automáticamente
+          const generateRes = await api.post('/generate', { prompt: requestData.prompt_request, model: requestData.model, id: requestId });
           logger.info('Auto-generate response received', { status: generateRes.status, response: generateRes.data });
-          fetchQueue(); // Refrescar la tabla para mostrar la respuesta
+          
+          // Esperar un momento para que la base de datos se actualice
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          // Refrescar la tabla para mostrar la respuesta
+          await fetchQueue();
+          
+          // Verificar múltiples veces si la respuesta se cargó correctamente
+          const checkResponse = async (attempt: number = 1) => {
+            try {
+              const timestamp = Date.now();
+              const queueRes = await api.get(`/requests?t=${timestamp}`, {
+                headers: {
+                  'Cache-Control': 'no-cache',
+                  'Pragma': 'no-cache'
+                }
+              });
+              
+              if (queueRes.data && Array.isArray(queueRes.data)) {
+                const newItem = queueRes.data.find((item: any) => item.ID === requestId);
+                logger.info(`Checking response for ID ${requestId} (attempt ${attempt})`, { 
+                  found: !!newItem, 
+                  hasResponse: !!(newItem && newItem.PROMPT_RESPONSE),
+                  isCompleted: newItem?.FLAG_COMPLETADO === 1,
+                  response: newItem?.PROMPT_RESPONSE 
+                });
+                
+                if (newItem && newItem.PROMPT_RESPONSE && newItem.FLAG_COMPLETADO === 1) {
+                  setRowResponses(prev => ({ ...prev, [requestId]: newItem.PROMPT_RESPONSE }));
+                  logger.info('Auto-updated row response for ID', { id: requestId, response: newItem.PROMPT_RESPONSE });
+                  return true; // Success
+                }
+              }
+              
+              // If not found and we haven't tried too many times, try again
+              if (attempt < 5) {
+                logger.info(`Response not ready for ID ${requestId}, retrying in 1 second (attempt ${attempt})`);
+                setTimeout(() => checkResponse(attempt + 1), 1000);
+              } else {
+                logger.warn(`Response not found for ID ${requestId} after ${attempt} attempts`);
+              }
+            } catch (err) {
+              logger.error('Error checking response', { error: err, attempt });
+            }
+          };
+          
+          // Start checking for response
+          checkResponse();
+          
         } catch (generateErr: any) {
           logger.error('Error in auto-generate', { error: generateErr.message, status: generateErr.response?.status });
+          // Aún así, refrescar la tabla para mostrar la solicitud creada
+          await fetchQueue();
         }
       } else {
-        logger.warn('No ID received from request, skipping auto-generate');
+        logger.warn('No ID received from request, skipping auto-generate', { response: res.data });
+        await fetchQueue();
       }
     } catch (err: any) {
       logger.error('Error submitting DB request', { error: err.message, status: err.response?.status });
@@ -576,6 +681,10 @@ const App: React.FC = () => {
           )}
         </div>
         <h2 style={{ marginTop: 40 }}>Prompt Queue ({queue.length} items)</h2>
+        {/* Debug info */}
+        <div style={{ fontSize: '12px', color: 'gray', marginBottom: '10px' }}>
+          Debug: Queue length: {queue.length} | RowResponses keys: {Object.keys(rowResponses).join(', ')}
+        </div>
         <table border={1} cellPadding={6} style={{ width: '100%', marginTop: 12 }}>
           <thead>
             <tr>
@@ -608,6 +717,14 @@ const App: React.FC = () => {
                     // Check if it's a CLOB object
                     if (response && typeof response === 'object' && (response as any)._length) {
                       return `Respuesta disponible (${(response as any)._length} caracteres)`;
+                    }
+                    // Log for debugging
+                    if (item.ID === 27) {
+                      console.log('Rendering ID 27:', { 
+                        rowResponses: rowResponses[item.ID], 
+                        itemResponse: item.PROMPT_RESPONSE, 
+                        finalResponse: response 
+                      });
                     }
                     return String(response);
                   })()}</td>
