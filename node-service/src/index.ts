@@ -16,6 +16,35 @@ oracledb.initOracleClient();
 const app = express();
 app.use(express.json());
 
+// Simple rate limiting middleware
+const requestCounts = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_MAX = 20; // reduced to 20 requests per minute for stricter control
+
+app.use((req, res, next) => {
+  const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  
+  if (!requestCounts.has(clientIP)) {
+    requestCounts.set(clientIP, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+  } else {
+    const clientData = requestCounts.get(clientIP)!;
+    if (now > clientData.resetTime) {
+      clientData.count = 1;
+      clientData.resetTime = now + RATE_LIMIT_WINDOW;
+    } else {
+      clientData.count++;
+    }
+    
+    if (clientData.count > RATE_LIMIT_MAX) {
+      logger.warn(`Rate limit exceeded for ${clientIP}`, { count: clientData.count });
+      return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+    }
+  }
+  
+  next();
+});
+
 // Middleware para manejar errores de parsing de JSON
 app.use((err: any, req: any, res: any, next: any) => {
   if (err instanceof SyntaxError && 'body' in err) {
@@ -207,16 +236,22 @@ app.post('/api/request', async (req, res) => {
 app.get('/api/requests', async (req, res) => {
   let conn;
   try {
-    logger.info('Starting /api/requests endpoint');
+    logger.debug('Starting /api/requests endpoint'); // Changed to debug level
     conn = await getOracleConnection();
-    logger.info('Oracle connection established');
+    logger.debug('Oracle connection established'); // Changed to debug level
+    
+    // Add limit to prevent excessive data transfer
+    const limit = parseInt(req.query.limit as string) || 100;
+    const offset = parseInt(req.query.offset as string) || 0;
     
     const result = await conn.execute(
       `SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, 
               DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE,
               FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
-       FROM middleware.PROMPT_QUEUE ORDER BY FECHA_REQUEST DESC`,
-      [],
+       FROM middleware.PROMPT_QUEUE 
+       ORDER BY FECHA_REQUEST DESC
+       OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`,
+      { offset, limit },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     
@@ -408,6 +443,59 @@ app.get('/api/tags', async (req, res) => {
   } catch (err: any) {
     logger.error('Error al obtener modelos de Ollama', err);
     res.status(500).json({ error: err.message, models: [] });
+  }
+});
+
+// Endpoint to check if queue has data (lightweight)
+app.get('/api/queue-status', async (req, res) => {
+  let conn;
+  try {
+    conn = await getOracleConnection();
+    const result = await conn.execute(
+      `SELECT COUNT(*) as count FROM middleware.PROMPT_QUEUE`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    await conn.close();
+    
+    const count = result.rows?.[0]?.COUNT || 0;
+    res.json({ hasData: count > 0, count });
+  } catch (err: any) {
+    if (conn) await conn.close();
+    logger.error('Error checking queue status', err);
+    res.status(500).json({ error: err.message, hasData: false, count: 0 });
+  }
+});
+
+// Endpoint to check rate limiting status
+app.get('/api/rate-limit-status', (req, res) => {
+  const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
+  const clientData = requestCounts.get(clientIP);
+  
+  if (clientData) {
+    const now = Date.now();
+    const timeLeft = Math.max(0, clientData.resetTime - now);
+    const isLimited = clientData.count >= RATE_LIMIT_MAX;
+    
+    res.json({
+      clientIP,
+      requestCount: clientData.count,
+      maxRequests: RATE_LIMIT_MAX,
+      timeWindow: RATE_LIMIT_WINDOW,
+      timeLeft,
+      isLimited,
+      resetTime: new Date(clientData.resetTime).toISOString()
+    });
+  } else {
+    res.json({
+      clientIP,
+      requestCount: 0,
+      maxRequests: RATE_LIMIT_MAX,
+      timeWindow: RATE_LIMIT_WINDOW,
+      timeLeft: 0,
+      isLimited: false,
+      resetTime: null
+    });
   }
 });
 

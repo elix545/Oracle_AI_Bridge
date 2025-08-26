@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from './api';
 import logger from './logger';
+import config from './config';
 
 interface PromptQueueItem {
   ID: number;
@@ -93,6 +94,12 @@ const App: React.FC = () => {
   const [showOllamaModels, setShowOllamaModels] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isFetching, setIsFetching] = useState(false); // Add state to prevent concurrent fetches
+  const [lastFetchTime, setLastFetchTime] = useState(0); // Track last fetch time for caching
+  const [rateLimitCount, setRateLimitCount] = useState(0); // Track rate limit occurrences
+  const [lastRateLimitTime, setLastRateLimitTime] = useState(0); // Track last rate limit time
+  const [pollingEnabled, setPollingEnabled] = useState(true); // Control polling state
+  const [concurrentRequestCount, setConcurrentRequestCount] = useState(0); // Track concurrent requests
 
   // Función para limpiar datos y asegurar que sean serializables
   function sanitizeData(data: any): any {
@@ -158,11 +165,41 @@ const App: React.FC = () => {
   logger.info('App component initialized');
 
   const fetchQueue = async () => {
-    logger.info('Fetching queue from /api/requests');
+    // Prevent concurrent fetches with stricter control
+    if (isFetching || concurrentRequestCount >= config.polling.maxConcurrentRequests) {
+      logger.debug('Fetch blocked - already in progress or max concurrent requests reached', { 
+        isFetching, 
+        concurrentRequestCount, 
+        maxAllowed: config.polling.maxConcurrentRequests 
+      });
+      return;
+    }
+    
+    // Check if we should skip this fetch (cache for configured time)
+    const now = Date.now();
+    if (now - lastFetchTime < config.polling.cacheTime) {
+      logger.debug(`Skipping fetch due to cache (last fetch was less than ${config.polling.cacheTime}ms ago)`);
+      return;
+    }
+    
+    // Check if polling is disabled
+    if (!pollingEnabled) {
+      logger.debug('Polling is disabled, skipping fetch');
+      return;
+    }
+    
+    setIsFetching(true);
+    setConcurrentRequestCount(prev => prev + 1);
+    setLastFetchTime(Date.now());
+    logger.info('Fetching queue from /api/requests', { 
+      concurrentRequests: concurrentRequestCount + 1,
+      pollingEnabled,
+      queueLength: queue.length 
+    });
     try {
       // Add cache-busting parameter to prevent browser caching
       const timestamp = Date.now();
-      const res = await api.get(`/requests?t=${timestamp}`, {
+      const res = await api.get(`/requests?t=${timestamp}&limit=${config.ui.maxQueueItems}`, {
         headers: {
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache',
@@ -208,6 +245,12 @@ const App: React.FC = () => {
         }
         setQueue(rows);
         setError(null);
+        
+        // Reset rate limit counter on successful request
+        if (rateLimitCount > 0) {
+          logger.info('Successful request, resetting rate limit counter');
+          setRateLimitCount(0);
+        }
       } else {
         logger.error('Queue response is not an array', { data: res.data });
         setQueue([]);
@@ -215,12 +258,54 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       logger.error('Error fetching queue', { error: err.message, status: err.response?.status });
-      setQueue([]);
-      setError(`Error al obtener la cola: ${err.message}`);
+      
+      // Handle specific error cases
+      if (err.response?.status === 429) {
+        // Rate limit exceeded - implement exponential backoff
+        const now = Date.now();
+        setRateLimitCount(prev => prev + 1);
+        setLastRateLimitTime(now);
+        
+        logger.warn('Rate limit exceeded, implementing backoff', { 
+          count: rateLimitCount + 1, 
+          lastTime: lastRateLimitTime 
+        });
+        
+        setError('Demasiadas peticiones. Esperando antes de intentar de nuevo...');
+        
+        // Clear error after backoff period
+        const backoffTime = Math.min(config.polling.rateLimitBackoff * Math.pow(2, rateLimitCount), 300000); // Max 5 minutes
+        setTimeout(() => {
+          setError(null);
+        }, backoffTime);
+        
+        // Don't clear the queue on rate limit errors to preserve existing data
+      } else if (err.response?.status === 500) {
+        // Server error
+        setQueue([]);
+        setError(`Error del servidor: ${err.message}`);
+      } else if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+        // Connection error
+        setQueue([]);
+        setError('No se puede conectar con el servidor. Verifique que el backend esté ejecutándose.');
+      } else {
+        // Other errors
+        setQueue([]);
+        setError(`Error al obtener la cola: ${err.message}`);
+      }
+    } finally {
+      setIsFetching(false);
+      setConcurrentRequestCount(prev => Math.max(0, prev - 1));
     }
   };
 
   const fetchModels = async () => {
+    // Prevent concurrent fetches
+    if (isFetching) {
+      logger.debug('Models fetch already in progress, skipping');
+      return;
+    }
+    
     logger.info('=== fetchModels function called ===');
     logger.info('Fetching models from /api/tags');
     try {
@@ -256,6 +341,9 @@ const App: React.FC = () => {
       logger.error('Error fetching models', { error: err.message, status: err.response?.status, stack: err.stack });
       setModels([]);
       setError(`Error al obtener modelos: ${err.message}`);
+    } finally {
+      setIsFetching(false);
+      setConcurrentRequestCount(prev => Math.max(0, prev - 1));
     }
   };
 
@@ -295,39 +383,80 @@ const App: React.FC = () => {
     logger.info('=== Calling initializeApp... ===');
     initializeApp();
     
-    // Set up polling interval with adaptive timing
-    const interval = setInterval(() => {
-      logger.debug('Polling queue - interval triggered');
+    // Set up polling interval with adaptive timing and better control
+    let pollInterval: NodeJS.Timeout;
+    let isPolling = false;
+    
+    const startPolling = () => {
+      if (isPolling) return; // Prevent multiple polling instances
       
-      // Check if there are pending requests and adjust polling frequency
-      const hasPendingRequests = queue.some(item => item.FLAG_COMPLETADO === 0);
-      
-      if (hasPendingRequests) {
-        logger.debug('Pending requests detected, polling more frequently');
-        fetchQueue();
-        
-        // Also check for new responses in pending requests
-        queue.forEach(item => {
-          if (item.FLAG_COMPLETADO === 0 && item.PROMPT_RESPONSE) {
-            logger.info('Found pending request with response, updating rowResponses', { 
-              id: item.ID, 
-              response: item.PROMPT_RESPONSE 
-            });
-            setRowResponses(prev => ({ ...prev, [item.ID]: item.PROMPT_RESPONSE }));
-          }
-        });
-      } else {
-        fetchQueue();
-      }
-    }, 2000); // Reduced to 2 seconds for better responsiveness
+      isPolling = true;
+             pollInterval = setInterval(async () => {
+         try {
+           logger.debug('Polling queue - interval triggered');
+           
+           // Check if there are pending requests and adjust polling frequency
+           const hasPendingRequests = queue.some(item => item.FLAG_COMPLETADO === 0);
+           
+           // If queue is empty, disable polling completely to avoid rate limiting
+           if (queue.length === 0 && config.polling.disablePollingWhenEmpty) {
+             logger.debug('Queue is empty, disabling polling completely');
+             setPollingEnabled(false);
+             return;
+           }
+           
+           // Re-enable polling if queue has data
+           if (queue.length > 0 && !pollingEnabled) {
+             logger.debug('Queue has data, re-enabling polling');
+             setPollingEnabled(true);
+           }
+           
+           // Check if we're in rate limit backoff period
+           const now = Date.now();
+           if (rateLimitCount > 0 && (now - lastRateLimitTime) < config.polling.rateLimitBackoff) {
+             logger.debug('In rate limit backoff period, skipping poll');
+             return;
+           }
+           
+           if (hasPendingRequests) {
+             logger.debug('Pending requests detected, polling more frequently');
+             await fetchQueue();
+             
+             // Also check for new responses in pending requests
+             queue.forEach(item => {
+               if (item.FLAG_COMPLETADO === 0 && item.PROMPT_RESPONSE) {
+                 logger.info('Found pending request with response, updating rowResponses', { 
+                   id: item.ID, 
+                   response: item.PROMPT_RESPONSE 
+                 });
+                 setRowResponses(prev => ({ ...prev, [item.ID]: item.PROMPT_RESPONSE }));
+               }
+             });
+           } else {
+             await fetchQueue();
+           }
+         } catch (error) {
+           logger.error('Error during polling', { error });
+         }
+       }, config.polling.interval); // Use configured polling interval
+    };
+    
+    // Start polling after a short delay
+    const pollingTimeout = setTimeout(() => {
+      startPolling();
+    }, 1000);
     
     logger.info('Polling interval set up for queue updates');
     
     return () => {
-      logger.info('Cleaning up interval');
-      clearInterval(interval);
+      logger.info('Cleaning up polling');
+      clearTimeout(pollingTimeout);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      isPolling = false;
     };
-  }, [queue]); // Added queue as dependency to react to changes
+  }, []); // Removed queue dependency to prevent infinite loops
 
   // Mostrar automáticamente los responses ya procesados en la tabla
   useEffect(() => {
@@ -605,6 +734,22 @@ const App: React.FC = () => {
           </div>
         )}
         
+        {/* Rate limiting status */}
+        {rateLimitCount > 0 && (
+          <div style={{ 
+            backgroundColor: '#fff3e0', 
+            color: '#e65100', 
+            padding: '8px 12px', 
+            marginBottom: '16px', 
+            borderRadius: '4px',
+            border: '1px solid #ff9800',
+            fontSize: '14px'
+          }}>
+            <strong>⚠️ Rate Limiting:</strong> Se han detectado demasiadas peticiones. 
+            El sistema está esperando {Math.min(config.polling.rateLimitBackoff * Math.pow(2, rateLimitCount - 1), 300000) / 1000} segundos antes del siguiente intento.
+          </div>
+        )}
+        
         <div style={{ display: 'flex', gap: 32 }}>
           <form onSubmit={handleDbRequest} style={{ flex: 1 }}>
             <h2>New Request using DB</h2>
@@ -680,11 +825,39 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
-        <h2 style={{ marginTop: 40 }}>Prompt Queue ({queue.length} items)</h2>
-        {/* Debug info */}
-        <div style={{ fontSize: '12px', color: 'gray', marginBottom: '10px' }}>
-          Debug: Queue length: {queue.length} | RowResponses keys: {Object.keys(rowResponses).join(', ')}
-        </div>
+                 <div style={{ marginTop: 40, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+           <h2>Prompt Queue ({queue.length} items)</h2>
+           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+             <button 
+               onClick={() => setPollingEnabled(!pollingEnabled)}
+               style={{ 
+                 padding: '8px 16px', 
+                 backgroundColor: pollingEnabled ? '#dc3545' : '#28a745', 
+                 color: 'white', 
+                 border: 'none', 
+                 borderRadius: '4px',
+                 fontSize: '12px'
+               }}
+             >
+               {pollingEnabled ? '⏸️ Pausar Polling' : '▶️ Reanudar Polling'}
+             </button>
+             <button 
+               onClick={fetchQueue} 
+               disabled={isFetching}
+               style={{ padding: '8px 16px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}
+             >
+               {isFetching ? config.ui.loadingText : config.ui.refreshButtonText}
+             </button>
+           </div>
+         </div>
+                 {/* Debug info */}
+         <div style={{ fontSize: '12px', color: 'gray', marginBottom: '10px' }}>
+           Debug: Queue length: {queue.length} | RowResponses keys: {Object.keys(rowResponses).join(', ')} | 
+           Polling: {pollingEnabled ? 'Habilitado' : 'Deshabilitado'} | 
+           Fetching: {isFetching ? 'Activo' : 'Inactivo'} | 
+           Concurrent: {concurrentRequestCount} | 
+           Rate Limit: {rateLimitCount}
+         </div>
         <table border={1} cellPadding={6} style={{ width: '100%', marginTop: 12 }}>
           <thead>
             <tr>

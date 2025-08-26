@@ -1,12 +1,10 @@
 import axios from 'axios';
 import logger from './logger';
-
-// Configurar Axios para usar la URL correcta según el entorno
-const baseURL = import.meta.env.DEV ? '/api' : 'http://localhost:3001/api';
+import config from './config';
 
 const api = axios.create({
-  baseURL: baseURL,
-  timeout: 300000, // 5 minutos
+  baseURL: config.api.baseURL,
+  timeout: config.api.timeout,
   headers: {
     'Content-Type': 'application/json',
   },
