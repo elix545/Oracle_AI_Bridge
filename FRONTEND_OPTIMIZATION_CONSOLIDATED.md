@@ -38,32 +38,32 @@ export const config = {
     timeout: 300000, // 5 minutes
   },
   
-  // Polling Configuration
+  // Polling Configuration - Configurable desde variables de entorno
   polling: {
-    interval: 15000, // 15 seconds - increased from 5s (3x más lento)
-    cacheTime: 10000, // 10 seconds cache - increased from 3s (3x más largo)
-    maxRetries: 3,
-    emptyQueueInterval: 30000, // 30 seconds when queue is empty
-    rateLimitBackoff: 60000, // 60 seconds after rate limit
-    maxConcurrentRequests: 1, // Only allow 1 request at a time
-    disablePollingWhenEmpty: true, // Completely disable polling when queue is empty
+    interval: parseInt(import.meta.env.VITE_POLLING_INTERVAL || '15000'), // 15 seconds default
+    cacheTime: parseInt(import.meta.env.VITE_POLLING_CACHE_TIME || '10000'), // 10 seconds cache default
+    maxRetries: parseInt(import.meta.env.VITE_POLLING_MAX_RETRIES || '3'), // 3 retries default
+    emptyQueueInterval: parseInt(import.meta.env.VITE_POLLING_EMPTY_QUEUE_INTERVAL || '30000'), // 30 seconds when queue is empty
+    rateLimitBackoff: parseInt(import.meta.env.VITE_POLLING_RATE_LIMIT_BACKOFF || '60000'), // 60 seconds after rate limit
+    maxConcurrentRequests: parseInt(import.meta.env.VITE_POLLING_MAX_CONCURRENT_REQUESTS || '1'), // Only allow 1 request at a time
+    disablePollingWhenEmpty: import.meta.env.VITE_POLLING_DISABLE_WHEN_EMPTY !== 'false', // true by default
   },
   
-  // Rate Limiting
+  // Rate Limiting - Configurable desde variables de entorno
   rateLimit: {
-    maxRequestsPerMinute: 30,
+    maxRequestsPerMinute: parseInt(import.meta.env.VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE || '30'), // 30 requests per minute default
   },
   
-  // UI Configuration
+  // UI Configuration - Configurable desde variables de entorno
   ui: {
-    maxQueueItems: 50,
-    refreshButtonText: 'Refrescar',
-    loadingText: 'Refrescando...',
+    maxQueueItems: parseInt(import.meta.env.VITE_UI_MAX_QUEUE_ITEMS || '50'), // 50 items default
+    refreshButtonText: import.meta.env.VITE_UI_REFRESH_BUTTON_TEXT || 'Refrescar',
+    loadingText: import.meta.env.VITE_UI_LOADING_TEXT || 'Refrescando...',
   },
   
-  // Logging Configuration
+  // Logging Configuration - Configurable desde variables de entorno
   logging: {
-    level: import.meta.env.DEV ? 'debug' : 'info',
+    level: import.meta.env.VITE_LOGGING_LEVEL || (import.meta.env.DEV ? 'debug' : 'info'), // Configurable with fallback to DEV mode
   },
 };
 ```
@@ -533,7 +533,7 @@ const logger = {
 - **Estabilidad:** Eliminación de bucles infinitos y peticiones concurrentes
 - **Escalabilidad:** Sistema puede manejar más usuarios
 
-## Configuración de Variables de Entorno para Rate Limiting
+## Configuración de Variables de Entorno
 
 ### Variables Disponibles en `node-service/.env`:
 
@@ -551,6 +551,37 @@ RATE_LIMIT_MAX=20                          # Máximo de peticiones por ventana (
 # RATE_LIMIT_ENABLED=false                 # Deshabilitar completamente
 ```
 
+### Variables Disponibles en `react-frontend/.env`:
+
+```bash
+# Configuración de Polling Optimizada
+VITE_POLLING_INTERVAL=15000                    # Intervalo de polling en milisegundos (15 segundos)
+VITE_POLLING_CACHE_TIME=10000                  # Tiempo de cache en milisegundos (10 segundos)
+VITE_POLLING_MAX_RETRIES=3                     # Máximo de reintentos en caso de error
+VITE_POLLING_EMPTY_QUEUE_INTERVAL=30000        # Intervalo cuando la cola está vacía (30 segundos)
+VITE_POLLING_RATE_LIMIT_BACKOFF=60000          # Tiempo de espera después de rate limit (60 segundos)
+VITE_POLLING_MAX_CONCURRENT_REQUESTS=1         # Máximo de peticiones concurrentes
+VITE_POLLING_DISABLE_WHEN_EMPTY=true           # Deshabilitar polling cuando la cola está vacía
+
+# Configuración de Rate Limiting Frontend
+VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE=30     # Máximo de peticiones por minuto
+
+# Configuración de UI
+VITE_UI_MAX_QUEUE_ITEMS=50                     # Máximo de elementos en la cola
+VITE_UI_REFRESH_BUTTON_TEXT=Refrescar          # Texto del botón de refrescar
+VITE_UI_LOADING_TEXT=Refrescando...            # Texto de carga
+
+# Configuración de Logging
+VITE_LOGGING_LEVEL=debug                        # Nivel de logging (debug, info, warn, error)
+
+# Ejemplos de configuración:
+# VITE_POLLING_INTERVAL=5000                   # 5 segundos para testing muy rápido
+# VITE_POLLING_INTERVAL=30000                  # 30 segundos para producción
+# VITE_POLLING_CACHE_TIME=5000                 # 5 segundos cache para desarrollo
+# VITE_POLLING_CACHE_TIME=20000                # 20 segundos cache para producción
+# VITE_LOGGING_LEVEL=info                      # Solo info y errores en producción
+# VITE_UI_MAX_QUEUE_ITEMS=100                  # Mostrar más elementos en la cola
+
 ### Configuración Recomendada por Entorno
 
 #### Desarrollo:
@@ -559,18 +590,18 @@ RATE_LIMIT_MAX=20                          # Máximo de peticiones por ventana (
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_WINDOW=30000                    # 30 segundos para testing rápido
 RATE_LIMIT_MAX=30                          # 30 peticiones por 30 segundos
-```
 
-```javascript
-// react-frontend/src/config.ts
-polling: {
-  interval: 10000, // 10 seconds
-  cacheTime: 5000, // 5 seconds
-  maxConcurrentRequests: 1,
-  disablePollingWhenEmpty: true,
-  rateLimitBackoff: 30000, // 30 seconds
-  maxRetries: 3
-}
+# react-frontend/.env
+VITE_POLLING_INTERVAL=10000                # 10 segundos para testing rápido
+VITE_POLLING_CACHE_TIME=5000               # 5 segundos cache para desarrollo
+VITE_POLLING_MAX_RETRIES=3                 # 3 reintentos
+VITE_POLLING_EMPTY_QUEUE_INTERVAL=15000    # 15 segundos cuando la cola está vacía
+VITE_POLLING_RATE_LIMIT_BACKOFF=30000      # 30 segundos después de rate limit
+VITE_POLLING_MAX_CONCURRENT_REQUESTS=1     # Solo 1 petición concurrente
+VITE_POLLING_DISABLE_WHEN_EMPTY=true       # Deshabilitar polling cuando no hay datos
+VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE=30 # 30 peticiones por minuto
+VITE_UI_MAX_QUEUE_ITEMS=50                 # 50 elementos máximo
+VITE_LOGGING_LEVEL=debug                   # Logging detallado para desarrollo
 ```
 
 #### Producción:
@@ -579,18 +610,18 @@ polling: {
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_WINDOW=60000                    # 1 minuto estándar
 RATE_LIMIT_MAX=20                          # 20 peticiones por minuto (estricto)
-```
 
-```javascript
-// react-frontend/src/config.ts
-polling: {
-  interval: 30000, // 30 seconds
-  cacheTime: 15000, // 15 seconds
-  maxConcurrentRequests: 1,
-  disablePollingWhenEmpty: true,
-  rateLimitBackoff: 60000, // 60 seconds
-  maxRetries: 5
-}
+# react-frontend/.env
+VITE_POLLING_INTERVAL=30000                # 30 segundos para producción
+VITE_POLLING_CACHE_TIME=15000              # 15 segundos cache para producción
+VITE_POLLING_MAX_RETRIES=5                 # 5 reintentos para mayor robustez
+VITE_POLLING_EMPTY_QUEUE_INTERVAL=60000    # 1 minuto cuando la cola está vacía
+VITE_POLLING_RATE_LIMIT_BACKOFF=60000      # 1 minuto después de rate limit
+VITE_POLLING_MAX_CONCURRENT_REQUESTS=1     # Solo 1 petición concurrente
+VITE_POLLING_DISABLE_WHEN_EMPTY=true       # Deshabilitar polling cuando no hay datos
+VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE=20 # 20 peticiones por minuto (estricto)
+VITE_UI_MAX_QUEUE_ITEMS=50                 # 50 elementos máximo
+VITE_LOGGING_LEVEL=info                    # Solo info y errores en producción
 ```
 
 #### Testing:
@@ -599,18 +630,18 @@ polling: {
 RATE_LIMIT_ENABLED=true
 RATE_LIMIT_WINDOW=15000                    # 15 segundos para testing muy rápido
 RATE_LIMIT_MAX=50                          # 50 peticiones por 15 segundos
-```
 
-```javascript
-// react-frontend/src/config.ts
-polling: {
-  interval: 5000, // 5 seconds for faster testing
-  cacheTime: 2000, // 2 seconds cache
-  maxConcurrentRequests: 1,
-  disablePollingWhenEmpty: false, // Keep polling for testing
-  rateLimitBackoff: 15000, // 15 seconds
-  maxRetries: 2
-}
+# react-frontend/.env
+VITE_POLLING_INTERVAL=5000                 # 5 segundos para testing muy rápido
+VITE_POLLING_CACHE_TIME=2000               # 2 segundos cache para testing
+VITE_POLLING_MAX_RETRIES=2                 # 2 reintentos para testing
+VITE_POLLING_EMPTY_QUEUE_INTERVAL=10000    # 10 segundos cuando la cola está vacía
+VITE_POLLING_RATE_LIMIT_BACKOFF=15000      # 15 segundos después de rate limit
+VITE_POLLING_MAX_CONCURRENT_REQUESTS=1     # Solo 1 petición concurrente
+VITE_POLLING_DISABLE_WHEN_EMPTY=false      # Mantener polling para testing
+VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE=50 # 50 peticiones por minuto para testing
+VITE_UI_MAX_QUEUE_ITEMS=100                # 100 elementos para testing
+VITE_LOGGING_LEVEL=debug                   # Logging detallado para testing
 ```
 
 ## Flujo de Manejo de Errores

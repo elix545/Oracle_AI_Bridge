@@ -85,6 +85,26 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
    NODE_ENV=development
    PORT=5173
    VITE_API_BASE_URL=/api
+   
+   # Configuración de Polling Optimizada
+   VITE_POLLING_INTERVAL=15000
+   VITE_POLLING_CACHE_TIME=10000
+   VITE_POLLING_MAX_RETRIES=3
+   VITE_POLLING_EMPTY_QUEUE_INTERVAL=30000
+   VITE_POLLING_RATE_LIMIT_BACKOFF=60000
+   VITE_POLLING_MAX_CONCURRENT_REQUESTS=1
+   VITE_POLLING_DISABLE_WHEN_EMPTY=true
+   
+   # Configuración de Rate Limiting Frontend
+   VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE=30
+   
+   # Configuración de UI
+   VITE_UI_MAX_QUEUE_ITEMS=50
+   VITE_UI_REFRESH_BUTTON_TEXT=Refrescar
+   VITE_UI_LOADING_TEXT=Refrescando...
+   
+   # Configuración de Logging
+   VITE_LOGGING_LEVEL=debug
    EOF
    ```
 
@@ -352,6 +372,26 @@ PORT=5173                                # Puerto del servidor de desarrollo
 
 # API Configuration
 VITE_API_BASE_URL=/api                   # URL base para las llamadas a la API
+
+# Polling Configuration
+VITE_POLLING_INTERVAL=15000              # Intervalo de polling en milisegundos (15 segundos)
+VITE_POLLING_CACHE_TIME=10000            # Tiempo de cache en milisegundos (10 segundos)
+VITE_POLLING_MAX_RETRIES=3               # Máximo de reintentos en caso de error
+VITE_POLLING_EMPTY_QUEUE_INTERVAL=30000  # Intervalo cuando la cola está vacía (30 segundos)
+VITE_POLLING_RATE_LIMIT_BACKOFF=60000    # Tiempo de espera después de rate limit (60 segundos)
+VITE_POLLING_MAX_CONCURRENT_REQUESTS=1   # Máximo de peticiones concurrentes
+VITE_POLLING_DISABLE_WHEN_EMPTY=true     # Deshabilitar polling cuando la cola está vacía
+
+# Rate Limiting Frontend
+VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE=30  # Máximo de peticiones por minuto
+
+# UI Configuration
+VITE_UI_MAX_QUEUE_ITEMS=50               # Máximo de elementos en la cola
+VITE_UI_REFRESH_BUTTON_TEXT=Refrescar    # Texto del botón de refrescar
+VITE_UI_LOADING_TEXT=Refrescando...      # Texto de carga
+
+# Logging Configuration
+VITE_LOGGING_LEVEL=debug                 # Nivel de logging (debug, info, warn, error)
 ```
 
 **Nota:** El frontend React utiliza Vite, que maneja automáticamente las variables de entorno. Las variables que empiecen con `VITE_` estarán disponibles en el código del frontend.
@@ -402,6 +442,26 @@ cat > react-frontend/.env << 'EOF'
 NODE_ENV=development
 PORT=5173
 VITE_API_BASE_URL=/api
+
+# Configuración de Polling Optimizada
+VITE_POLLING_INTERVAL=15000
+VITE_POLLING_CACHE_TIME=10000
+VITE_POLLING_MAX_RETRIES=3
+VITE_POLLING_EMPTY_QUEUE_INTERVAL=30000
+VITE_POLLING_RATE_LIMIT_BACKOFF=60000
+VITE_POLLING_MAX_CONCURRENT_REQUESTS=1
+VITE_POLLING_DISABLE_WHEN_EMPTY=true
+
+# Configuración de Rate Limiting Frontend
+VITE_RATE_LIMIT_MAX_REQUESTS_PER_MINUTE=30
+
+# Configuración de UI
+VITE_UI_MAX_QUEUE_ITEMS=50
+VITE_UI_REFRESH_BUTTON_TEXT=Refrescar
+VITE_UI_LOADING_TEXT=Refrescando...
+
+# Configuración de Logging
+VITE_LOGGING_LEVEL=debug
 EOF
 ```
 
