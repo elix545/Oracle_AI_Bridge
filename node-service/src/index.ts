@@ -383,15 +383,24 @@ app.post('/api/generate', async (req, res) => {
       
       conn = await getOracleConnection();
       const result = await conn.execute(
-        `SELECT DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE 
-         FROM middleware.PROMPT_QUEUE WHERE ID = :id`,
-        { id: simpleId },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        `BEGIN
+           :cursor := middleware.READ_PROMPT_REQUEST_SVC(:id);
+         END;`,
+        { 
+          id: simpleId,
+          cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR }
+        }
       );
+      
+      // Obtener el cursor y procesar los resultados
+      const cursor = result.outBinds.cursor;
+      const rows = await cursor.getRows();
+      await cursor.close();
       await conn.close();
-      if (result.rows && result.rows.length > 0 && result.rows[0].PROMPT_RESPONSE) {
+      
+      if (rows && rows.length > 0 && rows[0][0]) { // PROMPT_RESPONSE está en la primera columna
         logger.info(`[PROMPT_RESPONSE][CACHE] PROMPT_RESPONSE ya existe para ID`, { id: simpleId });
-        const sanitizedResponse = sanitizeData(result.rows[0].PROMPT_RESPONSE);
+        const sanitizedResponse = sanitizeData(rows[0][0]); // Primera columna es PROMPT_RESPONSE
         return res.json({ response: sanitizedResponse });
       }
     } catch (err: any) {
