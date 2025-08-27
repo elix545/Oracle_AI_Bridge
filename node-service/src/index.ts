@@ -236,25 +236,50 @@ app.post('/api/request', async (req, res) => {
   let conn;
   try {
     conn = await getOracleConnection();
+    
+    // Usar la función middleware.INSERT_PROMPT_REQUEST actualizada
     const result = await conn.execute(
-      `INSERT INTO middleware.PROMPT_QUEUE (ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, MODEL)
-       VALUES (middleware.PROMPT_QUEUE_SEQ.NEXTVAL, :usuario, :modulo, :transicion, :prompt_request, 0, 0, SYSDATE, :model)
-       RETURNING ID INTO :id`,
+      `BEGIN
+         :id := middleware.INSERT_PROMPT_REQUEST(
+           p_usuario => :usuario,
+           p_modulo => :modulo,
+           p_transicion => :transicion,
+           p_prompt_request => :prompt_request,
+           p_model => :model
+         );
+       END;`,
       {
         usuario,
         modulo,
         transicion,
         prompt_request,
-        model: model || null,
+        model: model || 'llama3:8b',
         id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
       }
     );
+    
     await conn.commit();
     await conn.close();
-    res.json({ id: result.outBinds.id });
+    
+    const generatedId = result.outBinds.id;
+    logger.info('Request insertado usando función INSERT_PROMPT_REQUEST', { 
+      id: generatedId, 
+      usuario, 
+      modulo, 
+      transicion,
+      model: model || 'llama3:8b'
+    });
+    
+    res.json({ id: generatedId });
   } catch (err: any) {
     if (conn) await conn.close();
-    logger.error('Error al insertar request en Oracle', err);
+    logger.error('Error al insertar request usando función INSERT_PROMPT_REQUEST', { 
+      error: err.message, 
+      usuario, 
+      modulo, 
+      transicion,
+      model: model || 'llama3:8b'
+    });
     res.status(500).json({ error: err.message });
   }
 });
