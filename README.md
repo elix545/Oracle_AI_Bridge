@@ -35,6 +35,7 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
 │   ├── Dockerfile
 │   ├── package.json
 │   ├── tsconfig.json
+│   ├── .env                    # Variables de entorno del servicio backend
 │   └── src/
 │       └── index.ts
 ├── react-frontend/
@@ -43,6 +44,7 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
 │   ├── tsconfig.json
 │   ├── vite.config.ts
 │   ├── index.html
+│   ├── .env                    # Variables de entorno del frontend (opcional)
 │   └── src/
 │       ├── App.tsx
 │       └── main.tsx
@@ -50,13 +52,38 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
 │   └── SQLPLUS.md
 ```
 
+**Nota:** Los archivos `.env` son **requeridos** para el funcionamiento correcto del sistema. Consulta la sección [Configuración de variables de entorno](#configuración-de-variables-de-entorno) para más detalles.
+
 ## Requisitos
 - Docker y Docker Compose
 - (Opcional) Node.js y npm para desarrollo local
 
+> **⚠️ Importante:** Antes de ejecutar el sistema, debes crear los archivos de configuración `.env` en las carpetas `node-service/` y `react-frontend/`. Consulta la sección [Uso rápido](#uso-rápido) para ver los comandos de configuración.
+
 ## Uso rápido
 
-1. **Levanta todos los servicios:**
+1. **Prepara los archivos de configuración:**
+   ```sh
+   # Crear archivo .env para node-service (requerido)
+   cat > node-service/.env << 'EOF'
+   ORACLE_USER=middleware
+   ORACLE_PASSWORD=oracle
+   ORACLE_CONNECT_STRING=oracle-xe:1521/XE
+   OLLAMA_URL=http://ollama:11434
+   OLLAMA_DEFAULT_MODEL=llama3:8b
+   PORT=3001
+   TIMEOUT_NODE_SERVICE=300000
+   EOF
+   
+   # Crear archivo .env para react-frontend (opcional)
+   cat > react-frontend/.env << 'EOF'
+   NODE_ENV=development
+   PORT=5173
+   VITE_API_BASE_URL=/api
+   EOF
+   ```
+
+2. **Levanta todos los servicios:**
    ```sh
    docker compose up --build -d
    ```
@@ -271,32 +298,104 @@ El archivo `docker-compose.yml` está configurado para usar la opción `env_file
 
 No es necesario un archivo `.env` global en la raíz del proyecto, a menos que quieras definir variables globales para todos los servicios.
 
-### Ejemplo de uso para node-service
+### Configuración del node-service (.env)
 
-Copia el archivo de ejemplo y edítalo según tus necesidades:
+**Ubicación:** `node-service/.env`
+
+**Variables requeridas:**
+
+```env
+# Oracle Database Configuration
+ORACLE_USER=middleware                    # Usuario de la base de datos Oracle
+ORACLE_PASSWORD=oracle                    # Contraseña del usuario Oracle
+ORACLE_CONNECT_STRING=oracle-xe:1521/XE  # String de conexión (host:puerto/SID)
+
+# Ollama AI Service Configuration
+OLLAMA_URL=http://ollama:11434           # URL del servicio Ollama (interno del contenedor)
+OLLAMA_DEFAULT_MODEL=llama3:8b           # Modelo de IA por defecto
+
+# Service Configuration
+PORT=3001                                 # Puerto donde escuchará el servicio Node.js
+TIMEOUT_NODE_SERVICE=300000              # Timeout del servicio en milisegundos (5 min)
+```
+
+**Crear el archivo:**
 
 ```sh
+# Opción 1: Crear desde cero
+touch node-service/.env
+
+# Opción 2: Copiar desde plantilla (si existe)
 cp node-service/.env.example node-service/.env
 ```
 
-Contenido sugerido para `node-service/.env.example`:
+### Configuración del react-frontend (.env)
+
+**Ubicación:** `react-frontend/.env`
+
+**Variables opcionales (para desarrollo):**
 
 ```env
-# Oracle DB
+# Environment Configuration
+NODE_ENV=development                      # Entorno de ejecución
+PORT=5173                                # Puerto del servidor de desarrollo
+
+# API Configuration
+VITE_API_BASE_URL=/api                   # URL base para las llamadas a la API
+```
+
+**Nota:** El frontend React utiliza Vite, que maneja automáticamente las variables de entorno. Las variables que empiecen con `VITE_` estarán disponibles en el código del frontend.
+
+### Variables de entorno por defecto
+
+Si no se proporcionan archivos `.env`, los servicios utilizarán valores por defecto:
+
+- **node-service:** Valores hardcodeados en el código fuente
+- **react-frontend:** Configuración por defecto de Vite
+- **oracle-xe:** Configuración estándar de Oracle XE
+- **ollama:** Configuración estándar de Ollama
+
+### Seguridad y buenas prácticas
+
+1. **Nunca commitees archivos `.env`** al repositorio
+2. **Usa `.env.example`** como plantilla para documentar las variables requeridas
+3. **Variables sensibles:** Usa contraseñas fuertes para producción
+4. **Validación:** El sistema valida la presencia de archivos `.env` antes de iniciar
+
+## Solución de problemas
+
+### Archivos .env faltantes
+
+**Error:** `env file ./node-service/.env not found` o `env file ./react-frontend/.env not found`
+
+**Solución:** Crear los archivos `.env` requeridos en cada servicio:
+
+```bash
+# Para node-service
+cat > node-service/.env << 'EOF'
 ORACLE_USER=middleware
 ORACLE_PASSWORD=oracle
 ORACLE_CONNECT_STRING=oracle-xe:1521/XE
-
-# Ollama
 OLLAMA_URL=http://ollama:11434
 OLLAMA_DEFAULT_MODEL=llama3:8b
-
-# Service Configuration
 PORT=3001
 TIMEOUT_NODE_SERVICE=300000
+EOF
+
+# Para react-frontend (opcional)
+cat > react-frontend/.env << 'EOF'
+NODE_ENV=development
+PORT=5173
+VITE_API_BASE_URL=/api
+EOF
 ```
 
-## Solución de problemas
+**Verificación:** Después de crear los archivos, reinicia los servicios:
+
+```bash
+docker compose down
+docker compose up -d
+```
 
 ### Error NJS-138: Oracle Thin mode no compatible
 Si encuentras el error `NJS-138: connections to this database server version are not supported by node-oracledb in Thin mode`, el sistema ya está configurado para usar el modo Thick con Oracle Instant Client.
