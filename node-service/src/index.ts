@@ -270,14 +270,18 @@ app.get('/api/requests', async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 100;
     const offset = parseInt(req.query.offset as string) || 0;
     
+    // Oracle 11g compatible pagination using ROWNUM
     const result = await conn.execute(
-      `SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, 
-              DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE,
-              FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
-       FROM middleware.PROMPT_QUEUE 
-       ORDER BY FECHA_REQUEST DESC
-       OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`,
-      { offset, limit },
+      `SELECT * FROM (
+         SELECT a.*, ROWNUM rnum FROM (
+           SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, 
+                  DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE,
+                  FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
+           FROM middleware.PROMPT_QUEUE 
+           ORDER BY FECHA_REQUEST DESC
+         ) a WHERE ROWNUM <= :maxRow
+       ) WHERE rnum > :offset`,
+      { maxRow: offset + limit, offset },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     
@@ -349,22 +353,25 @@ app.post('/api/generate', async (req, res) => {
   if (id) {
     let conn;
     try {
+      // Asegurar que id sea un valor simple, no un array
+      const simpleId = Array.isArray(id) ? id[0] : id;
+      
       conn = await getOracleConnection();
       const result = await conn.execute(
         `SELECT DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE 
          FROM middleware.PROMPT_QUEUE WHERE ID = :id`,
-        { id },
+        { id: simpleId },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       await conn.close();
       if (result.rows && result.rows.length > 0 && result.rows[0].PROMPT_RESPONSE) {
-        logger.info(`[PROMPT_RESPONSE][CACHE] PROMPT_RESPONSE ya existe para ID`, { id });
+        logger.info(`[PROMPT_RESPONSE][CACHE] PROMPT_RESPONSE ya existe para ID`, { id: simpleId });
         const sanitizedResponse = sanitizeData(result.rows[0].PROMPT_RESPONSE);
         return res.json({ response: sanitizedResponse });
       }
     } catch (err: any) {
       if (conn) await conn.close();
-      logger.error(`[PROMPT_RESPONSE][CACHE][ERROR] Error al consultar PROMPT_RESPONSE en Oracle`, { id, error: err.message });
+      logger.error(`[PROMPT_RESPONSE][CACHE][ERROR] Error al consultar PROMPT_RESPONSE en Oracle`, { id, simpleId: Array.isArray(id) ? id[0] : id, error: err.message });
       // Si hay error, continuar con el flujo normal
     }
   }
@@ -385,47 +392,51 @@ app.post('/api/generate', async (req, res) => {
       responseType: typeof response.data.response
     });
 
-    // Si se recibe un ID, guardar la respuesta en la base de datos
-    if (id && response.data.response) {
-      let conn;
-      try {
-        const responseText = sanitizeData(response.data.response);
-        logger.info(`[PROMPT_RESPONSE][DEBUG] Intentando guardar en PROMPT_RESPONSE para ID ${id}:`, {
-          type: typeof responseText,
-          length: responseText.length,
-          preview: responseText.substring(0, 200)
-        });
-        
-        conn = await getOracleConnection();
-        const updateResult = await conn.execute(
-          `UPDATE middleware.PROMPT_QUEUE SET PROMPT_RESPONSE = :response, FECHA_RESPONSE = SYSDATE, FLAG_COMPLETADO = 1 WHERE ID = :id`,
-          { response: responseText, id }
-        );
-        await conn.commit();
-        await conn.close();
-        
-        logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update`, { 
-          id, 
-          rowsAffected: updateResult.rowsAffected,
-          responseLength: responseText.length
-        });
-        
-        if (!updateResult.rowsAffected) {
-          logger.warn(`[PROMPT_RESPONSE][UPDATE] No se actualizó ninguna fila para ID`, { id });
-        } else {
-          logger.info(`[PROMPT_RESPONSE][UPDATE] PROMPT_RESPONSE actualizado correctamente para ID`, { id });
-        }
-      } catch (dbErr: any) {
-        if (conn) await conn.close();
-        logger.error(`[PROMPT_RESPONSE][UPDATE][ERROR] Error al actualizar PROMPT_RESPONSE en Oracle`, { 
-          id, 
-          error: dbErr.message, 
-          stack: dbErr.stack 
-        });
-      }
-    } else if (id) {
-      logger.warn(`[PROMPT_RESPONSE] No se recibió respuesta de Ollama para ID`, { id });
-    }
+         // Si se recibe un ID, guardar la respuesta en la base de datos
+     if (id && response.data.response) {
+       let conn;
+       try {
+         // Asegurar que id sea un valor simple, no un array
+         const simpleId = Array.isArray(id) ? id[0] : id;
+         const responseText = sanitizeData(response.data.response);
+         
+         logger.info(`[PROMPT_RESPONSE][DEBUG] Intentando guardar en PROMPT_RESPONSE para ID ${simpleId}:`, {
+           type: typeof responseText,
+           length: responseText.length,
+           preview: responseText.substring(0, 200)
+         });
+         
+         conn = await getOracleConnection();
+         const updateResult = await conn.execute(
+           `UPDATE middleware.PROMPT_QUEUE SET PROMPT_RESPONSE = :response, FECHA_RESPONSE = SYSDATE, FLAG_COMPLETADO = 1 WHERE ID = :id`,
+           { response: responseText, id: simpleId }
+         );
+         await conn.commit();
+         await conn.close();
+         
+         logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update`, { 
+           id: simpleId, 
+           rowsAffected: updateResult.rowsAffected,
+           responseLength: responseText.length
+         });
+         
+         if (!updateResult.rowsAffected) {
+           logger.warn(`[PROMPT_RESPONSE][UPDATE] No se actualizó ninguna fila para ID`, { id: simpleId });
+         } else {
+           logger.info(`[PROMPT_RESPONSE][UPDATE] PROMPT_RESPONSE actualizado correctamente para ID`, { id: simpleId });
+         }
+       } catch (dbErr: any) {
+         if (conn) await conn.close();
+         logger.error(`[PROMPT_RESPONSE][UPDATE][ERROR] Error al actualizar PROMPT_RESPONSE en Oracle`, { 
+           id, 
+           simpleId: Array.isArray(id) ? id[0] : id,
+           error: dbErr.message, 
+           stack: dbErr.stack 
+         });
+       }
+     } else if (id) {
+       logger.warn(`[PROMPT_RESPONSE] No se recibió respuesta de Ollama para ID`, { id });
+     }
 
     // Asegurar que solo se envíen datos serializables
     const safeResponse = {
