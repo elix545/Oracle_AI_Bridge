@@ -237,7 +237,7 @@ app.post('/api/request', async (req, res) => {
   try {
     conn = await getOracleConnection();
     
-    // Crear la función si no existe
+    // Crear la función si no existe o actualizarla
     try {
       await conn.execute(`
         CREATE OR REPLACE FUNCTION middleware.INSERT_PROMPT_REQUEST(
@@ -264,11 +264,11 @@ app.post('/api/request', async (req, res) => {
     const result = await conn.execute(
       `BEGIN
          :id := middleware.INSERT_PROMPT_REQUEST(
-           p_usuario => :usuario,
-           p_modulo => :modulo,
-           p_transicion => :transicion,
-           p_prompt_request => :prompt_request,
-           p_model => :model
+           :usuario,
+           :modulo,
+           :transicion,
+           :prompt_request,
+           :model
          );
        END;`,
       {
