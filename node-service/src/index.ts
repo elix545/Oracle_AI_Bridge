@@ -295,30 +295,32 @@ app.get('/api/requests', async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 100;
     const offset = parseInt(req.query.offset as string) || 0;
     
-    // Oracle 11g compatible pagination using ROWNUM
+    // Usar la función PL/SQL QUERY_PROMPT_QUEUE para consulta con paginación
     const result = await conn.execute(
-      `SELECT * FROM (
-         SELECT a.*, ROWNUM rnum FROM (
-           SELECT ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, 
-                  DBMS_LOB.SUBSTR(PROMPT_RESPONSE, 4000, 1) AS PROMPT_RESPONSE,
-                  FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST, FECHA_RESPONSE, FECHA_LECTURA, MODEL
-           FROM middleware.PROMPT_QUEUE 
-           ORDER BY FECHA_REQUEST DESC
-         ) a WHERE ROWNUM <= :maxRow
-       ) WHERE rnum > :offset`,
-      { maxRow: offset + limit, offset },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      `BEGIN
+         :cursor := middleware.QUERY_PROMPT_QUEUE(:offset, :limit);
+       END;`,
+      { 
+        cursor: { type: oracledb.CURSOR, dir: oracledb.BIND_OUT },
+        offset,
+        limit
+      }
     );
     
+    // Obtener el cursor de salida
+    const cursor = result.outBinds.cursor;
+    const rows = await cursor.getRows();
+    await cursor.close();
+    
     logger.info('Oracle query executed', { 
-      hasRows: !!result.rows, 
-      rowCount: result.rows ? result.rows.length : 0,
-      firstRowKeys: result.rows && result.rows.length > 0 ? Object.keys(result.rows[0]) : []
+      hasRows: !!rows, 
+      rowCount: rows ? rows.length : 0,
+      firstRowKeys: rows && rows.length > 0 ? Object.keys(rows[0]) : []
     });
     
-    // Validar que result.rows sea un array y sanitizar los datos
-    if (result.rows && Array.isArray(result.rows)) {
-      const rows = result.rows.map((row: any) => {
+    // Validar que rows sea un array y sanitizar los datos
+    if (rows && Array.isArray(rows)) {
+      const sanitizedRows = rows.map((row: any) => {
         const sanitizedRow = sanitizeData(row);
         return {
           ...sanitizedRow,
@@ -327,7 +329,7 @@ app.get('/api/requests', async (req, res) => {
       });
       
       await conn.close();
-      logger.info('Sending queue data', { rowCount: rows.length });
+      logger.info('Sending queue data', { rowCount: sanitizedRows.length });
       
       // Set headers to prevent caching
       res.set({
@@ -337,7 +339,7 @@ app.get('/api/requests', async (req, res) => {
         'ETag': `"${Date.now()}"`
       });
       
-      res.json(rows);
+      res.json(sanitizedRows);
     } else {
       await conn.close();
       logger.error('Oracle result.rows is not an array', { result });

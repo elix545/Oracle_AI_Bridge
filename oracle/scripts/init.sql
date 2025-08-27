@@ -1,3 +1,11 @@
+-- Configurar el tamaño de la salida
+SET LINESIZE 1000
+SET PAGESIZE 0
+SET TERMOUT ON
+SET ECHO ON
+SET FEEDBACK ON
+SET SERVEROUTPUT ON
+
 -- Crear usuario middleware
 CREATE USER middleware IDENTIFIED BY oracle;
 

@@ -18,13 +18,6 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [3/6] Removing all images to force rebuild...
-docker-compose down --rmi all --volumes --remove-orphans
-if %errorlevel% neq 0 (
-    echo Warning: Some images or volumes may not have been removed properly
-)
-
-echo.
 echo [4/6] Building all services...
 docker-compose build --no-cache
 if %errorlevel% neq 0 (

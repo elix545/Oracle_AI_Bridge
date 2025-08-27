@@ -1,6 +1,14 @@
 -- Script de prueba para insertar datos de ejemplo en PROMPT_QUEUE
 -- Ejecutar después de crear la tabla y funciones
 
+-- Configurar el tamaño de la salida
+SET LINESIZE 1000
+SET PAGESIZE 0
+SET TERMOUT ON
+SET ECHO ON
+SET FEEDBACK ON
+SET SERVEROUTPUT ON
+
 -- Insertar datos de prueba
 INSERT INTO middleware.PROMPT_QUEUE (USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, MODEL, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST)
 VALUES ('usuario1', 'TEST', 'T001', 'Este es un prompt de prueba 1', 'llama3:8b', 0, 0, SYSDATE);
