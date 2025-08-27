@@ -135,6 +135,16 @@ BEGIN
 END;
 /
 
+-- Función para verificar si hay datos en la cola (para el servicio)
+CREATE OR REPLACE FUNCTION middleware.HAS_DATA_PROMPT_QUEUE
+RETURN NUMBER IS
+  V_COUNT NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO V_COUNT FROM middleware.PROMPT_QUEUE;
+  RETURN V_COUNT;
+END;
+/
+
 -- Job de limpieza mensual (solo si DBMS_SCHEDULER está disponible)
 BEGIN
   DBMS_SCHEDULER.CREATE_JOB (

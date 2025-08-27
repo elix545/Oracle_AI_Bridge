@@ -530,17 +530,21 @@ app.get('/api/queue-status', async (req, res) => {
   try {
     conn = await getOracleConnection();
     const result = await conn.execute(
-      `SELECT COUNT(*) as count FROM middleware.PROMPT_QUEUE`,
-      [],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      `BEGIN
+         :count := middleware.HAS_DATA_PROMPT_QUEUE();
+       END;`,
+      { 
+        count: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+      }
     );
     await conn.close();
     
-    const count = result.rows?.[0]?.COUNT || 0;
+    const count = result.outBinds.count || 0;
+    logger.info('Queue status checked using function HAS_DATA_PROMPT_QUEUE', { count });
     res.json({ hasData: count > 0, count });
   } catch (err: any) {
     if (conn) await conn.close();
-    logger.error('Error checking queue status', err);
+    logger.error('Error checking queue status using function HAS_DATA_PROMPT_QUEUE', err);
     res.status(500).json({ error: err.message, hasData: false, count: 0 });
   }
 });
