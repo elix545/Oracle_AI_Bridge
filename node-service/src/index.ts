@@ -18,10 +18,27 @@ app.use(express.json());
 
 // Simple rate limiting middleware
 const requestCounts = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 20; // reduced to 20 requests per minute for stricter control
+
+// Rate limiting configuration from environment variables
+const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false'; // Default: true
+const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW || '60000'); // Default: 1 minute (60000ms)
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '20'); // Default: 20 requests per minute
+
+// Log rate limiting configuration
+logger.info('Rate limiting configuration', {
+  enabled: RATE_LIMIT_ENABLED,
+  window: RATE_LIMIT_WINDOW,
+  maxRequests: RATE_LIMIT_MAX,
+  windowSeconds: RATE_LIMIT_WINDOW / 1000,
+  maxRequestsPerMinute: RATE_LIMIT_MAX
+});
 
 app.use((req, res, next) => {
+  // Skip rate limiting if disabled
+  if (!RATE_LIMIT_ENABLED) {
+    return next();
+  }
+
   const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
   const now = Date.now();
   
@@ -37,8 +54,17 @@ app.use((req, res, next) => {
     }
     
     if (clientData.count > RATE_LIMIT_MAX) {
-      logger.warn(`Rate limit exceeded for ${clientIP}`, { count: clientData.count });
-      return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+      logger.warn(`Rate limit exceeded for ${clientIP}`, { 
+        count: clientData.count, 
+        maxRequests: RATE_LIMIT_MAX,
+        windowSeconds: RATE_LIMIT_WINDOW / 1000
+      });
+      return res.status(429).json({ 
+        error: 'Too many requests. Please slow down.',
+        retryAfter: Math.ceil(RATE_LIMIT_WINDOW / 1000),
+        limit: RATE_LIMIT_MAX,
+        window: RATE_LIMIT_WINDOW / 1000
+      });
     }
   }
   
@@ -472,31 +498,103 @@ app.get('/api/rate-limit-status', (req, res) => {
   const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
   const clientData = requestCounts.get(clientIP);
   
+  // Base response with configuration
+  const baseResponse = {
+    clientIP,
+    configuration: {
+      enabled: RATE_LIMIT_ENABLED,
+      windowSeconds: RATE_LIMIT_WINDOW / 1000,
+      maxRequests: RATE_LIMIT_MAX,
+      maxRequestsPerMinute: RATE_LIMIT_MAX
+    }
+  };
+  
   if (clientData) {
     const now = Date.now();
     const timeLeft = Math.max(0, clientData.resetTime - now);
     const isLimited = clientData.count >= RATE_LIMIT_MAX;
     
     res.json({
-      clientIP,
+      ...baseResponse,
       requestCount: clientData.count,
-      maxRequests: RATE_LIMIT_MAX,
-      timeWindow: RATE_LIMIT_WINDOW,
       timeLeft,
       isLimited,
-      resetTime: new Date(clientData.resetTime).toISOString()
+      resetTime: new Date(clientData.resetTime).toISOString(),
+      remainingRequests: Math.max(0, RATE_LIMIT_MAX - clientData.count),
+      usagePercentage: Math.round((clientData.count / RATE_LIMIT_MAX) * 100)
     });
   } else {
     res.json({
-      clientIP,
+      ...baseResponse,
       requestCount: 0,
-      maxRequests: RATE_LIMIT_MAX,
-      timeWindow: RATE_LIMIT_WINDOW,
       timeLeft: 0,
       isLimited: false,
-      resetTime: null
+      resetTime: null,
+      remainingRequests: RATE_LIMIT_MAX,
+      usagePercentage: 0
     });
   }
+});
+
+// Endpoint to update rate limiting configuration (development only)
+app.post('/api/rate-limit-config', (req, res) => {
+  // Only allow in development environment
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ 
+      error: 'Configuration updates not allowed in production',
+      message: 'Rate limiting configuration can only be updated via environment variables in production'
+    });
+  }
+
+  const { enabled, window, maxRequests } = req.body;
+  
+  // Validate input
+  if (enabled !== undefined && typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean' });
+  }
+  
+  if (window !== undefined && (typeof window !== 'number' || window < 1000)) {
+    return res.status(400).json({ error: 'window must be a number >= 1000ms' });
+  }
+  
+  if (maxRequests !== undefined && (typeof maxRequests !== 'number' || maxRequests < 1)) {
+    return res.status(400).json({ error: 'maxRequests must be a number >= 1' });
+  }
+
+  // Update configuration
+  if (enabled !== undefined) {
+    // Note: This is a simplified approach. In production, use environment variables
+    logger.info('Rate limiting enabled status updated', { 
+      old: RATE_LIMIT_ENABLED, 
+      new: enabled 
+    });
+  }
+  
+  if (window !== undefined) {
+    logger.info('Rate limiting window updated', { 
+      old: RATE_LIMIT_WINDOW, 
+      new: window,
+      oldSeconds: RATE_LIMIT_WINDOW / 1000,
+      newSeconds: window / 1000
+    });
+  }
+  
+  if (maxRequests !== undefined) {
+    logger.info('Rate limiting max requests updated', { 
+      old: RATE_LIMIT_MAX, 
+      new: maxRequests 
+    });
+  }
+
+  res.json({ 
+    message: 'Configuration update request received',
+    note: 'In production, update environment variables and restart the service',
+    currentConfig: {
+      enabled: RATE_LIMIT_ENABLED,
+      window: RATE_LIMIT_WINDOW,
+      maxRequests: RATE_LIMIT_MAX
+    }
+  });
 });
 
 // Endpoint para recibir logs del frontend

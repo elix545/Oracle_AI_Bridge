@@ -73,6 +73,11 @@ Oracle AI Bridge es una solución de integración entre Oracle Forms y modelos d
    OLLAMA_DEFAULT_MODEL=llama3:8b
    PORT=3001
    TIMEOUT_NODE_SERVICE=300000
+   
+   # Configuración de Rate Limiting
+   RATE_LIMIT_ENABLED=true
+   RATE_LIMIT_WINDOW=60000
+   RATE_LIMIT_MAX=20
    EOF
    
    # Crear archivo .env para react-frontend (opcional)
@@ -317,6 +322,11 @@ OLLAMA_DEFAULT_MODEL=llama3:8b           # Modelo de IA por defecto
 # Service Configuration
 PORT=3001                                 # Puerto donde escuchará el servicio Node.js
 TIMEOUT_NODE_SERVICE=300000              # Timeout del servicio en milisegundos (5 min)
+
+# Rate Limiting Configuration
+RATE_LIMIT_ENABLED=true                  # Habilitar/deshabilitar rate limiting
+RATE_LIMIT_WINDOW=60000                  # Ventana de tiempo en milisegundos (1 minuto)
+RATE_LIMIT_MAX=20                        # Máximo de peticiones por ventana
 ```
 
 **Crear el archivo:**
@@ -380,6 +390,11 @@ OLLAMA_URL=http://ollama:11434
 OLLAMA_DEFAULT_MODEL=llama3:8b
 PORT=3001
 TIMEOUT_NODE_SERVICE=300000
+
+# Configuración de Rate Limiting
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_WINDOW=60000
+RATE_LIMIT_MAX=20
 EOF
 
 # Para react-frontend (opcional)

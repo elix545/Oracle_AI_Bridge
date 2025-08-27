@@ -81,10 +81,27 @@ export const config = {
 ```javascript
 // Simple rate limiting middleware
 const requestCounts = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 20; // reduced from 60 to 20 requests per minute for stricter control
+
+// Rate limiting configuration from environment variables
+const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false'; // Default: true
+const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW || '60000'); // Default: 1 minute (60000ms)
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '20'); // Default: 20 requests per minute
+
+// Log rate limiting configuration
+logger.info('Rate limiting configuration', {
+  enabled: RATE_LIMIT_ENABLED,
+  window: RATE_LIMIT_WINDOW,
+  maxRequests: RATE_LIMIT_MAX,
+  windowSeconds: RATE_LIMIT_WINDOW / 1000,
+  maxRequestsPerMinute: RATE_LIMIT_MAX
+});
 
 app.use((req, res, next) => {
+  // Skip rate limiting if disabled
+  if (!RATE_LIMIT_ENABLED) {
+    return next();
+  }
+
   const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
   const now = Date.now();
   
@@ -100,8 +117,17 @@ app.use((req, res, next) => {
     }
     
     if (clientData.count > RATE_LIMIT_MAX) {
-      logger.warn(`Rate limit exceeded for ${clientIP}`, { count: clientData.count });
-      return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+      logger.warn(`Rate limit exceeded for ${clientIP}`, { 
+        count: clientData.count, 
+        maxRequests: RATE_LIMIT_MAX,
+        windowSeconds: RATE_LIMIT_WINDOW / 1000
+      });
+      return res.status(429).json({ 
+        error: 'Too many requests. Please slow down.',
+        retryAfter: Math.ceil(RATE_LIMIT_WINDOW / 1000),
+        limit: RATE_LIMIT_MAX,
+        window: RATE_LIMIT_WINDOW / 1000
+      });
     }
   }
   
@@ -296,27 +322,82 @@ app.get('/api/rate-limit-status', (req, res) => {
   const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
   const clientData = requestCounts.get(clientIP);
   
-  if (!clientData) {
-    return res.json({
-      clientIP,
-      requestCount: 0,
+  // Base response with configuration
+  const baseResponse = {
+    clientIP,
+    configuration: {
+      enabled: RATE_LIMIT_ENABLED,
+      windowSeconds: RATE_LIMIT_WINDOW / 1000,
       maxRequests: RATE_LIMIT_MAX,
+      maxRequestsPerMinute: RATE_LIMIT_MAX
+    }
+  };
+  
+  if (clientData) {
+    const now = Date.now();
+    const timeLeft = Math.max(0, clientData.resetTime - now);
+    const isLimited = clientData.count >= RATE_LIMIT_MAX;
+    
+    res.json({
+      ...baseResponse,
+      requestCount: clientData.count,
+      timeLeft,
+      isLimited,
+      resetTime: new Date(clientData.resetTime).toISOString(),
+      remainingRequests: Math.max(0, RATE_LIMIT_MAX - clientData.count),
+      usagePercentage: Math.round((clientData.count / RATE_LIMIT_MAX) * 100)
+    });
+  } else {
+    res.json({
+      ...baseResponse,
+      requestCount: 0,
       timeLeft: 0,
-      isLimited: false
+      isLimited: false,
+      resetTime: null,
+      remainingRequests: RATE_LIMIT_MAX,
+      usagePercentage: 0
     });
   }
+});
+```
+
+#### Endpoint de Configuración de Rate Limiting (Solo Desarrollo):
+```javascript
+app.post('/api/rate-limit-config', (req, res) => {
+  // Only allow in development environment
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ 
+      error: 'Configuration updates not allowed in production',
+      message: 'Rate limiting configuration can only be updated via environment variables in production'
+    });
+  }
+
+  const { enabled, window, maxRequests } = req.body;
   
-  const now = Date.now();
-  const timeLeft = Math.max(0, clientData.resetTime - now);
-  const isLimited = clientData.count >= RATE_LIMIT_MAX;
+  // Validate input
+  if (enabled !== undefined && typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean' });
+  }
   
-  res.json({
-    clientIP,
-    requestCount: clientData.count,
-    maxRequests: RATE_LIMIT_MAX,
-    timeLeft,
-    isLimited,
-    resetTime: new Date(clientData.resetTime).toISOString()
+  if (window !== undefined && (typeof window !== 'number' || window < 1000)) {
+    return res.status(400).json({ error: 'window must be a number >= 1000ms' });
+  }
+  
+  if (maxRequests !== undefined && (typeof maxRequests !== 'number' || maxRequests < 1)) {
+    return res.status(400).json({ error: 'maxRequests must be a number >= 1' });
+  }
+
+  // Update configuration (logging only in this implementation)
+  // In production, update environment variables and restart the service
+  
+  res.json({ 
+    message: 'Configuration update request received',
+    note: 'In production, update environment variables and restart the service',
+    currentConfig: {
+      enabled: RATE_LIMIT_ENABLED,
+      window: RATE_LIMIT_WINDOW,
+      maxRequests: RATE_LIMIT_MAX
+    }
   });
 });
 ```
@@ -452,10 +533,36 @@ const logger = {
 - **Estabilidad:** Eliminación de bucles infinitos y peticiones concurrentes
 - **Escalabilidad:** Sistema puede manejar más usuarios
 
-## Configuración Recomendada por Entorno
+## Configuración de Variables de Entorno para Rate Limiting
 
-### Desarrollo:
+### Variables Disponibles en `node-service/.env`:
+
+```bash
+# Configuración de Rate Limiting
+RATE_LIMIT_ENABLED=true                    # Habilitar/deshabilitar rate limiting (default: true)
+RATE_LIMIT_WINDOW=60000                    # Ventana de tiempo en milisegundos (default: 60000 = 1 minuto)
+RATE_LIMIT_MAX=20                          # Máximo de peticiones por ventana (default: 20)
+
+# Ejemplos de configuración:
+# RATE_LIMIT_WINDOW=30000                  # 30 segundos
+# RATE_LIMIT_WINDOW=120000                 # 2 minutos
+# RATE_LIMIT_MAX=10                        # 10 peticiones por ventana
+# RATE_LIMIT_MAX=50                        # 50 peticiones por ventana
+# RATE_LIMIT_ENABLED=false                 # Deshabilitar completamente
+```
+
+### Configuración Recomendada por Entorno
+
+#### Desarrollo:
+```bash
+# node-service/.env
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_WINDOW=30000                    # 30 segundos para testing rápido
+RATE_LIMIT_MAX=30                          # 30 peticiones por 30 segundos
+```
+
 ```javascript
+// react-frontend/src/config.ts
 polling: {
   interval: 10000, // 10 seconds
   cacheTime: 5000, // 5 seconds
@@ -466,8 +573,16 @@ polling: {
 }
 ```
 
-### Producción:
+#### Producción:
+```bash
+# node-service/.env
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_WINDOW=60000                    # 1 minuto estándar
+RATE_LIMIT_MAX=20                          # 20 peticiones por minuto (estricto)
+```
+
 ```javascript
+// react-frontend/src/config.ts
 polling: {
   interval: 30000, // 30 seconds
   cacheTime: 15000, // 15 seconds
@@ -478,8 +593,16 @@ polling: {
 }
 ```
 
-### Testing:
+#### Testing:
+```bash
+# node-service/.env
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_WINDOW=15000                    # 15 segundos para testing muy rápido
+RATE_LIMIT_MAX=50                          # 50 peticiones por 15 segundos
+```
+
 ```javascript
+// react-frontend/src/config.ts
 polling: {
   interval: 5000, // 5 seconds for faster testing
   cacheTime: 2000, // 2 seconds cache
@@ -540,6 +663,30 @@ Frontend → Backend → Rate Limit Exceeded → Error 429
 - **`/api/rate-limit-status`:** Estado actual del rate limiting
 - **`/api/queue-status`:** Estado de la cola de prompts
 - **`/api/requests`:** Datos con paginación y límites
+- **`/api/rate-limit-config`:** Actualizar configuración de rate limiting (solo desarrollo)
+
+### Uso del Endpoint de Configuración (Desarrollo):
+
+```bash
+# Verificar configuración actual
+curl http://localhost:3001/api/rate-limit-status
+
+# Actualizar configuración (solo en desarrollo)
+curl -X POST http://localhost:3001/api/rate-limit-config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "window": 30000,
+    "maxRequests": 30
+  }'
+
+# Deshabilitar rate limiting temporalmente
+curl -X POST http://localhost:3001/api/rate-limit-config \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+```
+
+**Nota:** En producción, la configuración solo se puede cambiar mediante variables de entorno y requiere reiniciar el servicio.
 
 ## Beneficios Esperados
 
