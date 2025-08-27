@@ -237,7 +237,30 @@ app.post('/api/request', async (req, res) => {
   try {
     conn = await getOracleConnection();
     
-    // Usar la función middleware.INSERT_PROMPT_REQUEST actualizada
+    // Crear la función si no existe
+    try {
+      await conn.execute(`
+        CREATE OR REPLACE FUNCTION middleware.INSERT_PROMPT_REQUEST(
+          P_USUARIO IN VARCHAR2,
+          P_MODULO IN VARCHAR2,
+          P_TRANSICION IN VARCHAR2,
+          P_PROMPT_REQUEST IN VARCHAR2,
+          P_MODEL IN VARCHAR2 DEFAULT 'llama3:8b'
+        ) RETURN NUMBER IS
+          NEW_ID NUMBER;
+        BEGIN
+          INSERT INTO middleware.PROMPT_QUEUE (ID, USUARIO, MODULO, TRANSICION, PROMPT_REQUEST, MODEL, FLAG_LECTURA, FLAG_COMPLETADO, FECHA_REQUEST)
+          VALUES (middleware.PROMPT_QUEUE_SEQ.NEXTVAL, P_USUARIO, P_MODULO, P_TRANSICION, P_PROMPT_REQUEST, P_MODEL, 0, 0, SYSDATE)
+          RETURNING ID INTO NEW_ID;
+          RETURN NEW_ID;
+        END;
+      `);
+      logger.info('Función INSERT_PROMPT_REQUEST creada/actualizada exitosamente');
+    } catch (createErr: any) {
+      logger.warn('Error al crear función (puede que ya exista):', createErr.message);
+    }
+    
+    // Usar la función middleware.INSERT_PROMPT_REQUEST
     const result = await conn.execute(
       `BEGIN
          :id := middleware.INSERT_PROMPT_REQUEST(
