@@ -440,25 +440,32 @@ app.post('/api/generate', async (req, res) => {
            preview: responseText.substring(0, 200)
          });
          
-         conn = await getOracleConnection();
-         const updateResult = await conn.execute(
-           `UPDATE middleware.PROMPT_QUEUE SET PROMPT_RESPONSE = :response, FECHA_RESPONSE = SYSDATE, FLAG_COMPLETADO = 1 WHERE ID = :id`,
-           { response: responseText, id: simpleId }
-         );
-         await conn.commit();
-         await conn.close();
-         
-         logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update`, { 
-           id: simpleId, 
-           rowsAffected: updateResult.rowsAffected,
-           responseLength: responseText.length
-         });
-         
-         if (!updateResult.rowsAffected) {
-           logger.warn(`[PROMPT_RESPONSE][UPDATE] No se actualizó ninguna fila para ID`, { id: simpleId });
-         } else {
-           logger.info(`[PROMPT_RESPONSE][UPDATE] PROMPT_RESPONSE actualizado correctamente para ID`, { id: simpleId });
-         }
+                   conn = await getOracleConnection();
+          const updateResult = await conn.execute(
+            `BEGIN
+               :rowsAffected := middleware.UPDATE_PROMPT_REQUEST(:id, :response);
+             END;`,
+            { 
+              id: simpleId,
+              response: responseText,
+              rowsAffected: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+            }
+          );
+          await conn.commit();
+          await conn.close();
+          
+          const rowsAffected = updateResult.outBinds.rowsAffected;
+          logger.info(`[PROMPT_RESPONSE][UPDATE] Resultado de update usando función UPDATE_PROMPT_REQUEST`, { 
+            id: simpleId, 
+            rowsAffected: rowsAffected,
+            responseLength: responseText.length
+          });
+          
+          if (!rowsAffected) {
+            logger.warn(`[PROMPT_RESPONSE][UPDATE] No se actualizó ninguna fila para ID`, { id: simpleId });
+          } else {
+            logger.info(`[PROMPT_RESPONSE][UPDATE] PROMPT_RESPONSE actualizado correctamente para ID`, { id: simpleId });
+          }
        } catch (dbErr: any) {
          if (conn) await conn.close();
          logger.error(`[PROMPT_RESPONSE][UPDATE][ERROR] Error al actualizar PROMPT_RESPONSE en Oracle`, { 
